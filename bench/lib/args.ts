@@ -1,4 +1,5 @@
 /* eslint-disable sonarjs/function-return-type -- ParseResult is a discriminated union */
+/* eslint-disable sonarjs/cognitive-complexity -- a flat table of flag handlers */
 /**
  * Command line parsing for `bun bench/run.ts`.
  *
@@ -16,6 +17,7 @@ export interface RunOptions {
     readonly dryRun: boolean;
     readonly maxCostUsd: number;
     readonly timeoutMs: number;
+    readonly jobs: number;
 }
 
 export interface RunDefaults {
@@ -36,6 +38,7 @@ interface Draft {
     dryRun: boolean;
     maxCostUsd: number;
     timeoutMs: number;
+    jobs: number;
 }
 
 function splitList(value: string): string[] {
@@ -103,6 +106,14 @@ function applyFlag(
             draft.timeoutMs = parsed * 1000;
             return undefined;
         }
+        case "--jobs": {
+            const parsed = Number(value);
+            if (!Number.isInteger(parsed) || parsed < 1) {
+                return "--jobs must be a positive integer";
+            }
+            draft.jobs = parsed;
+            return undefined;
+        }
         default:
             return `unknown argument: ${flag}`;
     }
@@ -133,6 +144,7 @@ export function parseRunArgs(
         dryRun: false,
         maxCostUsd: Number.POSITIVE_INFINITY,
         timeoutMs: 600_000,
+        jobs: 3,
     };
     let index = 0;
     while (index < argv.length) {
@@ -178,6 +190,7 @@ export const USAGE = [
     "  --modes with,without  plugin modes (default: with,without)",
     "  --projects all|a,b    projects (default: all)",
     "  --repeat N            repeats per cell (default: 1)",
+    "  --jobs N              runs to execute at once (default: 3)",
     "  --max-cost N          stop before a run whose projection exceeds N USD",
     "  --timeout N           per-run timeout in seconds (default: 600)",
     "  --dry-run             print the matrix without running it",

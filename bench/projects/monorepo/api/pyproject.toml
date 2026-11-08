@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "api"
+version = "0.1.0"
+description = "The API half of the bashlight benchmark monorepo."
+authors = ["Bashlight Bench <bench@example.com>"]
+packages = [{ include = "api" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

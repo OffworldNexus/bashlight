@@ -4,7 +4,8 @@
  * `opencode run --format json` writes one JSON object per line to stdout. The
  * benchmark only cares about a few of them, so this module is a pure fold over
  * the text: token usage and cost come from `step_finish`, tool activity from
- * `tool_use`, and failures from `tool_use` error states and `error` events.
+ * `tool_use`, failures from `tool_use` error states and `error` events, and
+ * the last passing test run from the shell tool calls in between.
  */
 
 import { addTokens, EMPTY_TOKENS, type RunActivity, type TokenUsage } from "./types.ts";
@@ -20,8 +21,25 @@ function asNumber(value: unknown): number {
     return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function asOptionalNumber(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function asString(value: unknown): string | undefined {
     return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Whether a shell command looks like it runs the project's test suite, lint or
+ * type checker. Deliberately broad: it only feeds the "last green" time, and a
+ * false positive costs nothing but a slightly earlier number.
+ */
+export function isTestCommand(command: string): boolean {
+    return (
+        /\b(pytest|vitest|jest|mocha|mypy|ruff|tsc)\b/.test(command) ||
+        /\b(pnpm|npm|yarn|bun)\s+(run\s+)?(test|lint|typecheck)\b/.test(command) ||
+        /(^|[\s;&|])\.\/manage\.py\b/.test(command)
+    );
 }
 
 /** Reads the nested `part.tokens` object of a `step_finish` event. */
@@ -40,6 +58,13 @@ function parseTokens(value: unknown): TokenUsage {
     };
 }
 
+/** The command string of a shell tool part, or `undefined` for other tools. */
+function shellCommand(
+    toolState: Record<string, unknown> | undefined,
+): string | undefined {
+    return asString(asRecord(toolState?.input)?.command);
+}
+
 interface Accumulator {
     tokens: TokenUsage;
     costUsd: number;
@@ -47,10 +72,39 @@ interface Accumulator {
     shellCalls: number;
     failedShellCalls: number;
     errors: string[];
+    firstTimestamp: number | undefined;
+    lastGreenTimestamp: number | undefined;
+}
+
+/** Folds a shell tool call into the shell counters and the last-green time. */
+function applyToolUse(
+    toolState: Record<string, unknown> | undefined,
+    tool: string,
+    status: string | undefined,
+    timestamp: number | undefined,
+    state: Accumulator,
+): void {
+    if (tool !== "shell" && tool !== "bash") {
+        return;
+    }
+    state.shellCalls += 1;
+    const exit = shellExitCode(toolState);
+    if (status === "error" || exit !== 0) {
+        state.failedShellCalls += 1;
+        return;
+    }
+    const command = shellCommand(toolState);
+    if (command !== undefined && isTestCommand(command) && timestamp !== undefined) {
+        state.lastGreenTimestamp = timestamp;
+    }
 }
 
 /** Folds a single already-parsed event into the accumulator. */
 function applyEvent(event: Record<string, unknown>, state: Accumulator): void {
+    const timestamp = asOptionalNumber(event.timestamp);
+    if (timestamp !== undefined && state.firstTimestamp === undefined) {
+        state.firstTimestamp = timestamp;
+    }
     const type = asString(event.type);
     if (type === "step_finish") {
         const part = asRecord(event.part);
@@ -60,16 +114,15 @@ function applyEvent(event: Record<string, unknown>, state: Accumulator): void {
     }
     if (type === "tool_use") {
         const part = asRecord(event.part);
-        const tool = asString(part?.tool) ?? "unknown";
         const toolState = asRecord(part?.state);
-        const status = asString(toolState?.status);
         state.toolCalls += 1;
-        if (tool === "shell" || tool === "bash") {
-            state.shellCalls += 1;
-            if (status === "error" || shellExitCode(toolState) !== 0) {
-                state.failedShellCalls += 1;
-            }
-        }
+        applyToolUse(
+            toolState,
+            asString(part?.tool) ?? "unknown",
+            asString(toolState?.status),
+            timestamp,
+            state,
+        );
         return;
     }
     if (type === "error") {
@@ -98,6 +151,8 @@ export function parseActivity(text: string): RunActivity {
         shellCalls: 0,
         failedShellCalls: 0,
         errors: [],
+        firstTimestamp: undefined,
+        lastGreenTimestamp: undefined,
     };
     for (const line of text.split("\n")) {
         const trimmed = line.trim();
@@ -115,12 +170,17 @@ export function parseActivity(text: string): RunActivity {
             applyEvent(event, state);
         }
     }
+    const lastGreenMs =
+        state.firstTimestamp !== undefined && state.lastGreenTimestamp !== undefined
+            ? Math.max(0, state.lastGreenTimestamp - state.firstTimestamp)
+            : 0;
     return {
         tokens: state.tokens,
         costUsd: state.costUsd,
         toolCalls: state.toolCalls,
         shellCalls: state.shellCalls,
         failedShellCalls: state.failedShellCalls,
+        lastGreenMs,
         errors: state.errors,
     };
 }

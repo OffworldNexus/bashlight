@@ -12,6 +12,7 @@ describe("buildMatrix", () => {
             dryRun: false,
             maxCostUsd: 0,
             timeoutMs: 1000,
+            jobs: 3,
         });
         expect(
             cells.map((cell) => `${cell.mode}/${cell.model}#${cell.iteration}`),

@@ -4,11 +4,11 @@ import { parseRunArgs } from "../../bench/lib/args.ts";
 
 const defaults = {
     models: ["openrouter/deepseek/deepseek-v4.1-flash"],
-    projects: ["poetry-shop", "uv-report"],
+    projects: ["monorepo", "uv-cli"],
 };
 
 describe("parseRunArgs", () => {
-    test("defaults to both modes and one repeat", () => {
+    test("defaults to both modes, one repeat and three jobs", () => {
         const parsed = parseRunArgs([], defaults);
         expect(parsed.ok).toBe(true);
         if (!parsed.ok) {
@@ -16,6 +16,7 @@ describe("parseRunArgs", () => {
         }
         expect(parsed.options.modes).toEqual(["with", "without"]);
         expect(parsed.options.repeat).toBe(1);
+        expect(parsed.options.jobs).toBe(3);
         expect(parsed.options.maxCostUsd).toBe(Number.POSITIVE_INFINITY);
     });
 
@@ -57,6 +58,15 @@ describe("parseRunArgs", () => {
         if (parsed.ok) {
             expect(parsed.options.timeoutMs).toBe(30_000);
         }
+    });
+
+    test("parses a job count and rejects a non-positive one", () => {
+        const parsed = parseRunArgs(["--jobs", "6"], defaults);
+        expect(parsed.ok).toBe(true);
+        if (parsed.ok) {
+            expect(parsed.options.jobs).toBe(6);
+        }
+        expect(parseRunArgs(["--jobs", "0"], defaults).ok).toBe(false);
     });
 
     test("treats --dry-run as a boolean that consumes nothing", () => {

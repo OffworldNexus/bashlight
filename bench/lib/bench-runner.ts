@@ -1,11 +1,14 @@
 /**
- * The benchmark runner: the matrix, the per-run lifecycle and the cost guard.
+ * The benchmark runner: the matrix, the per-run lifecycle, concurrency and the
+ * cost guard.
  *
  * A run is: create the isolated tree, copy and hydrate the template, install
  * the plugin (in `with` mode), drive `opencode run` headlessly, parse the
- * event stream, run the success checker and summarise the audit log. One
- * result line is appended per run. The class takes every collaborator through
- * its constructor so the orchestration can be exercised with fakes.
+ * event stream, run the success checker and summarise the audit log. One result
+ * line is appended per run. Cells run through a small worker pool so several
+ * isolated runs proceed at once; the cost guard reserves the cost of the runs
+ * already in flight. Every collaborator is injected so the orchestration can be
+ * exercised with fakes.
  */
 
 import type { TaskDefinition } from "../tasks.ts";
@@ -18,7 +21,7 @@ import type { BenchFileSystem } from "./fs.ts";
 import { Isolation } from "./isolation.ts";
 import type { OpenCodeRunner } from "./opencode-runner.ts";
 import type { ResultsStore } from "./results-store.ts";
-import { TemplatePreparer } from "./template.ts";
+import { resolveCommand, TemplatePreparer } from "./template.ts";
 import type { Mode, RunRecord } from "./types.ts";
 
 /** Filesystem layout and binaries the runner needs. */
@@ -70,6 +73,8 @@ export interface BenchRunOptions {
     readonly dryRun: boolean;
     readonly maxCostUsd: number;
     readonly timeoutMs: number;
+    /** How many runs may execute at once. */
+    readonly jobs: number;
 }
 
 const TASK_INSTALL_TIMEOUT_MS = 300_000;
@@ -105,7 +110,9 @@ export class BenchRunner {
     async run(options: BenchRunOptions): Promise<readonly RunRecord[]> {
         const cells = buildMatrix(options);
         if (options.dryRun) {
-            this.deps.logger.line(`dry run: ${cells.length} runs`);
+            this.deps.logger.line(
+                `dry run: ${cells.length} runs, ${options.jobs} at a time`,
+            );
             for (const cell of cells) {
                 this.deps.logger.line(
                     `  ${cell.project} ${cell.mode} ${cell.model} #${cell.iteration}`,
@@ -115,25 +122,52 @@ export class BenchRunner {
         }
         const guard = new CostGuard(options.maxCostUsd);
         const records: RunRecord[] = [];
-        const startedAt = new Date(this.deps.clock.now());
-        const runStamp = compactStamp(startedAt);
-        let index = 0;
-        for (const cell of cells) {
-            index += 1;
-            const projection = guard.check();
-            if (projection.stop) {
+        const runStamp = compactStamp(new Date(this.deps.clock.now()));
+        const total = cells.length;
+        const workers = Math.max(1, Math.min(options.jobs, total));
+        let next = 0;
+        let launched = 0;
+        let inFlight = 0;
+        let stopped = false;
+
+        const worker = async (): Promise<void> => {
+            for (;;) {
+                if (stopped) {
+                    return;
+                }
+                const projection = guard.check(inFlight);
+                if (projection.stop) {
+                    stopped = true;
+                    this.deps.logger.line(
+                        `stopping: spent $${projection.spent.toFixed(4)} + projected $${projection.projection.toFixed(4)} exceeds $${options.maxCostUsd}`,
+                    );
+                    return;
+                }
+                const cell = cells[next];
+                if (cell === undefined) {
+                    return;
+                }
+                next += 1;
+                launched += 1;
+                inFlight += 1;
+                let record: RunRecord;
+                try {
+                    record = await this.runCell(cell, runStamp, options);
+                } catch (error) {
+                    record = this.errorRecord(cell, `run failed: ${String(error)}`, 0);
+                } finally {
+                    inFlight -= 1;
+                }
+                this.deps.results.append(record);
+                records.push(record);
+                guard.record(record.costUsd);
                 this.deps.logger.line(
-                    `stopping before run ${index}/${cells.length}: spent $${projection.spent.toFixed(4)} + projected $${projection.mean.toFixed(4)} exceeds $${options.maxCostUsd}`,
+                    `[${launched}/${total}] ${cell.project} ${cell.mode} ${cell.model} #${cell.iteration} → ${record.success ? "pass" : "fail"} · $${record.costUsd.toFixed(4)} · ${(record.wallMs / 1000).toFixed(1)}s · in ${record.tokens.input} out ${record.tokens.output}`,
                 );
-                break;
             }
-            const record = await this.runCell(cell, runStamp, options);
-            records.push(record);
-            guard.record(record.costUsd);
-            this.deps.logger.line(
-                `[${index}/${cells.length}] ${cell.project} ${cell.mode} ${cell.model} #${cell.iteration} → ${record.success ? "pass" : "fail"} · $${record.costUsd.toFixed(4)} · ${(record.wallMs / 1000).toFixed(1)}s · in ${record.tokens.input} out ${record.tokens.output}`,
-            );
-        }
+        };
+
+        await Promise.all(Array.from({ length: workers }, worker));
         return records;
     }
 
@@ -193,14 +227,16 @@ export class BenchRunner {
         const check = await task.check({
             projectDirectory,
             fs: this.deps.fs,
-            run: (spec) =>
-                this.deps.processRunner.run({
-                    command: spec.command,
-                    args: spec.args,
-                    cwd: projectDirectory,
+            run: (spec) => {
+                const resolved = resolveCommand(spec, projectDirectory);
+                return this.deps.processRunner.run({
+                    command: resolved.command,
+                    args: resolved.args,
+                    cwd: resolved.cwd,
                     env: isolated.env,
                     timeoutMs: CHECK_TIMEOUT_MS,
-                }),
+                });
+            },
         });
         const auditText =
             cell.mode === "with"
@@ -236,9 +272,9 @@ export class BenchRunner {
             failedShellCalls: activity.failedShellCalls,
             rewrites: audit.rewrites,
             blocks: audit.blocks,
+            lastGreenMs: activity.lastGreenMs,
             ...(error === undefined ? {} : { error }),
         };
-        this.deps.results.append(record);
         return record;
     }
 
@@ -275,6 +311,7 @@ export class BenchRunner {
             failedShellCalls: 0,
             rewrites: 0,
             blocks: 0,
+            lastGreenMs: 0,
             error,
         };
     }

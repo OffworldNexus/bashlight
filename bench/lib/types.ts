@@ -57,6 +57,13 @@ export interface RunActivity {
     readonly toolCalls: number;
     readonly shellCalls: number;
     readonly failedShellCalls: number;
+    /**
+     * Milliseconds from the first event to the last successful test-like shell
+     * command, or 0 when the agent never ran a test that passed. A "green"
+     * moment means the agent had a passing suite at that point, not that it
+     * stopped there.
+     */
+    readonly lastGreenMs: number;
     readonly errors: readonly string[];
 }
 
@@ -90,5 +97,7 @@ export interface RunRecord {
     readonly failedShellCalls: number;
     readonly rewrites: number;
     readonly blocks: number;
+    /** Present from benchmark v2 on; older records omit it. */
+    readonly lastGreenMs?: number;
     readonly error?: string;
 }

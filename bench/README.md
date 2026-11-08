@@ -1,15 +1,17 @@
 # bashlight benchmark
 
-A small, reproducible task benchmark for bashlight. It runs a handful of fake projects
-through OpenCode headlessly, once **with** the bashlight plugin and once **without**, on
-a few cheap models, and records success, tokens, cost, wall time and shell activity.
+A reproducible task benchmark for bashlight. It runs multi-step fake projects through
+OpenCode headlessly, once **with** the bashlight plugin and once **without**, on a few
+cheap models, and records success, tokens, cost, wall time and shell activity. The
+results drive the charts on the [benchmark page](../docs/benchmark.md).
 
 ## Layout
 
 ```
 bench/
   run.ts            matrix runner (bun bench/run.ts)
-  report.ts         results.jsonl -> RESULTS.md (bun bench/report.ts)
+  report.ts         results -> RESULTS.md + charts (bun bench/report.ts)
+  charts.ts         SVG chart generation (bun bench/charts.ts)
   tasks.ts          the projects, their prompts and success checkers
   lib/              the harness (pure parsing/aggregation + thin adapters)
   projects/         committed project templates (source and lockfiles only)
@@ -18,38 +20,61 @@ bench/
   .cache/           shared package-manager caches (gitignored)
 ```
 
-Working copies of each project are created fresh under
-`/tmp/opencode/bench-runs/<run-id>/`, so the benchmark never mutates a template and
-never shares state between runs.
+Working copies are created fresh under `/tmp/opencode/bench-runs/<run-id>/`, so the
+benchmark never mutates a template and never shares state between runs.
 
 ## Projects and tasks
 
-| Project       | Stack           | Task                                                                 |
-| ------------- | --------------- | -------------------------------------------------------------------- |
-| `poetry-shop` | Poetry + pytest | add a `slugify_title` helper using `python-slugify`, with tests      |
-| `uv-report`   | uv + pytest     | add a `report` command that renders `data.csv` with `tabulate`       |
-| `pnpm-web`    | pnpm + vitest   | add a `formatRelative` util using `dayjs` (relativeTime), with tests |
+| Project              | Stack                | Task                                                             |
+| -------------------- | -------------------- | ---------------------------------------------------------------- |
+| `monorepo`           | Poetry + pnpm        | API slug helper and web validator, both suites green             |
+| `uv-cli`             | uv + ruff + mypy     | two subcommands; tests, lint and types must pass                 |
+| `poetry-django-lite` | Poetry + `manage.py` | a `report` command that reads YAML and writes a CSV, then run it |
+| `scripts`            | none                 | convert `data.yaml` to `data.csv` with a kept Python script      |
+| `pnpm-web`           | pnpm + vitest        | dayjs util and zod validator; tests, `tsc` and eslint must pass  |
 
-Each task's success checker runs the project's own test command _and_ verifies the new
-dependency is declared, so an agent cannot pass by "vendoring" the code.
+The prompts never name the toolchain. Each checker runs the project's own commands and
+verifies the new dependency is declared, so an agent cannot pass by "vendoring" the
+code.
 
 ## Running
 
 ```sh
-bun bench/run.ts                       # full default matrix
+bun bench/run.ts                       # full default matrix (5×2×3, --jobs 3)
 bun bench/run.ts --dry-run             # print the matrix, run nothing
-bun bench/run.ts --projects poetry-shop --modes with \
+bun bench/run.ts --projects scripts --modes without \
   --models openrouter/deepseek/deepseek-v4.1-flash
-bun bench/run.ts --max-cost 1          # stop before crossing a projected $1
-bun bench/report.ts                    # newest results -> bench/RESULTS.md
+bun bench/run.ts --repeat 3 --jobs 3 --max-cost 5
+bun bench/report.ts                    # newest results -> RESULTS.md + charts
+bun bench/report.ts --all              # merge every results file, then render
 ```
 
 Flags: `--models a,b`, `--modes with,without`, `--projects all|a,b`, `--repeat N`,
-`--timeout SECONDS`, `--max-cost USD`, `--dry-run`.
+`--jobs N` (parallel runs, default 3), `--timeout SECONDS`, `--max-cost USD`,
+`--dry-run`.
+
+The runner runs up to `--jobs` isolated cells at once. Before starting another it asks a
+cost guard whether `spend + mean(completed) × (in flight + 1)` would cross `--max-cost`,
+so a parallel matrix still respects the cap.
 
 The default models are three cheap, tool-capable models from three families:
 `openrouter/deepseek/deepseek-v4.1-flash`, `openrouter/openai/gpt-5-nano` and
-`openrouter/qwen/qwen3-coder-30b-a3b-instruct`.
+`openrouter/anthropic/claude-haiku-5.5`.
+
+## Metrics
+
+Each run records: success (from the checker), cost, input/output tokens, wall time,
+total shell calls, failed shell calls (non-zero exit or tool error), bashlight rewrites
+and blocks (from the run's audit log), and the time to the last passing test command
+("green"). `bench/report.ts` aggregates them by model × mode and by project × mode.
+
+## Charts
+
+`bench/charts.ts` renders five dependency-free SVGs into `docs/assets/benchmark/`:
+success, cost, wall time and failed shell calls by model, plus a per-project
+success/cost chart. They use a transparent background and mid-contrast colours that read
+on both light and dark pages. The renderer's scale and layout maths live in
+`bench/lib/chart.ts` and are unit-tested.
 
 ## Isolation
 

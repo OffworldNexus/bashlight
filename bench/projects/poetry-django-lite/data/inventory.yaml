@@ -1,0 +1,7 @@
+items:
+  - sku: A-1
+    name: Widget
+    qty: 3
+  - sku: B-2
+    name: Gadget
+    qty: 5

@@ -95,4 +95,67 @@ describe("parseActivity", () => {
         expect(activity.toolCalls).toBe(0);
         expect(activity.costUsd).toBe(0);
     });
+
+    test("measures the time to the last passing test command", () => {
+        const text = [
+            line({ type: "step_start", timestamp: 1_000 }),
+            line({
+                type: "tool_use",
+                timestamp: 2_000,
+                part: {
+                    tool: "shell",
+                    state: {
+                        status: "completed",
+                        input: { command: "poetry run pytest -q" },
+                        metadata: { metadata: { exit: 1 } },
+                    },
+                },
+            }),
+            line({
+                type: "tool_use",
+                timestamp: 5_000,
+                part: {
+                    tool: "shell",
+                    state: {
+                        status: "completed",
+                        input: { command: "poetry run pytest -q" },
+                        metadata: { metadata: { exit: 0 } },
+                    },
+                },
+            }),
+            line({
+                type: "tool_use",
+                timestamp: 9_000,
+                part: {
+                    tool: "shell",
+                    state: {
+                        status: "completed",
+                        input: { command: "echo done" },
+                        metadata: { metadata: { exit: 0 } },
+                    },
+                },
+            }),
+        ].join("\n");
+        // The failing pytest run does not count; the last passing one does.
+        expect(parseActivity(text).lastGreenMs).toBe(4_000);
+    });
+
+    test("reports no green when tests never pass", () => {
+        const text = [
+            line({ type: "step_start", timestamp: 1_000 }),
+            line({
+                type: "tool_use",
+                timestamp: 2_000,
+                part: {
+                    tool: "shell",
+                    state: {
+                        status: "completed",
+                        input: { command: "pytest" },
+                        metadata: { metadata: { exit: 1 } },
+                    },
+                },
+            }),
+        ].join("\n");
+        expect(parseActivity(text).lastGreenMs).toBe(0);
+    });
 });

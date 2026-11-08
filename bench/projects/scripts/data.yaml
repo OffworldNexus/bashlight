@@ -1,0 +1,6 @@
+- name: Ada
+  role: admin
+- name: Grace
+  role: editor
+- name: Linus
+  role: maintainer

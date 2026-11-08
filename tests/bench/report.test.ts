@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { aggregate, renderReport } from "../../bench/lib/report.ts";
+import {
+    aggregate,
+    aggregateByProject,
+    mergeRecords,
+    renderReport,
+} from "../../bench/lib/report.ts";
 import type { RunRecord } from "../../bench/lib/types.ts";
 
 function record(overrides: Partial<RunRecord>): RunRecord {
@@ -55,14 +60,56 @@ describe("renderReport", () => {
             record({ model: "m1", mode: "without" }),
             record({ model: "m2", mode: "with" }),
         ]);
-        expect(markdown).toContain("| Model | Mode |");
-        expect(markdown).toContain("| m1 | without |");
-        expect(markdown).toContain("| m1 | with |");
-        expect(markdown).toContain("| m2 | with |");
+        // Collapse the column padding prettier would apply.
+        const flat = markdown.replaceAll(/[ \t]+/g, " ");
+        expect(flat).toContain("| Model | Mode |");
+        expect(flat).toContain("| m1 | without |");
+        expect(flat).toContain("| m1 | with |");
+        expect(flat).toContain("| m2 | with |");
         expect(markdown).toContain("Runs: 3");
+    });
+
+    test("includes a per-project breakdown", () => {
+        const markdown = renderReport([
+            record({ project: "monorepo", mode: "with" }),
+            record({ project: "scripts", mode: "without" }),
+        ]);
+        const flat = markdown.replaceAll(/[ \t]+/g, " ");
+        expect(markdown).toContain("## By project");
+        expect(flat).toContain("| Project | Mode |");
+        expect(flat).toContain("| monorepo | with |");
+        expect(flat).toContain("| scripts | without |");
     });
 
     test("handles an empty result set", () => {
         expect(renderReport([])).toContain("Runs: 0");
+    });
+});
+
+describe("aggregateByProject", () => {
+    test("groups by project and mode", () => {
+        const rows = aggregateByProject([
+            record({ project: "p1", mode: "with", costUsd: 0.02 }),
+            record({ project: "p1", mode: "with", costUsd: 0.04 }),
+            record({ project: "p2", mode: "without", costUsd: 0.01 }),
+        ]);
+        expect(rows.map((row) => `${row.project}/${row.mode}`)).toEqual([
+            "p1/with",
+            "p2/without",
+        ]);
+        const first = rows.find((row) => row.project === "p1");
+        expect(first?.meanCostUsd).toBeCloseTo(0.03, 10);
+    });
+});
+
+describe("mergeRecords", () => {
+    test("concatenates files and drops duplicate run ids", () => {
+        const a = record({ runId: "a" });
+        const b = record({ runId: "b" });
+        const merged = mergeRecords([
+            [a, b],
+            [record({ runId: "b" }), record({ runId: "c" })],
+        ]);
+        expect(merged.map((item) => item.runId)).toEqual(["a", "b", "c"]);
     });
 });

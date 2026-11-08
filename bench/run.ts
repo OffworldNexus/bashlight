@@ -26,7 +26,7 @@ import { TASKS } from "./tasks.ts";
 export const DEFAULT_MODELS = [
     "openrouter/deepseek/deepseek-v4.1-flash",
     "openrouter/openai/gpt-5-nano",
-    "openrouter/qwen/qwen3-coder-30b-a3b-instruct",
+    "openrouter/anthropic/claude-haiku-5.5",
 ] as const;
 
 async function main(): Promise<number> {

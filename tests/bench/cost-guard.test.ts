@@ -31,4 +31,14 @@ describe("CostGuard", () => {
         expect(check.mean).toBeCloseTo(0.015, 10);
         expect(check.projection).toBeCloseTo(0.045, 10);
     });
+
+    test("reserves the cost of runs already in flight", () => {
+        const guard = new CostGuard(0.1);
+        guard.record(0.03);
+        expect(guard.check(0).stop).toBe(false);
+        // spent 0.03 + mean 0.03 × (3 in flight + this one) = 0.15 > 0.10
+        const busy = guard.check(3);
+        expect(busy.stop).toBe(true);
+        expect(busy.projection).toBeCloseTo(0.15, 10);
+    });
 });
