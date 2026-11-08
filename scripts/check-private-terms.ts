@@ -10,14 +10,28 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * Matches each term as a whole word (letters and digits around it end the
+ * match), case-insensitively, so short terms don't flag every identifier that
+ * happens to contain them.
+ */
 class PrivateTermChecker {
-    constructor(private readonly terms: readonly string[]) {}
+    private readonly patterns: readonly { term: string; regex: RegExp }[];
+
+    constructor(terms: readonly string[]) {
+        this.patterns = terms.map((term) => ({
+            term,
+            regex: new RegExp(
+                `(?<![\\p{L}\\p{N}])${RegExp.escape(term)}(?![\\p{L}\\p{N}])`,
+                "iu",
+            ),
+        }));
+    }
 
     findings(path: string, content: string): string[] {
-        const lower = content.toLowerCase();
-        return this.terms
-            .filter((term) => lower.includes(term.toLowerCase()))
-            .map((term) => `${path}: contains private term "${term}"`);
+        return this.patterns
+            .filter(({ regex }) => regex.test(content))
+            .map(({ term }) => `${path}: contains private term "${term}"`);
     }
 }
 
