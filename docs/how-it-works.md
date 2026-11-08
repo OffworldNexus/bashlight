@@ -82,20 +82,20 @@ has to be re-quoted as a whole.
 
 ## The rewrite strategies, most surgical first
 
-For each rewritten command, the rewriter tries these in order and stops at the first
-that works:
+First, a whole-script pass looks for **binding edits**: a contiguous run of replaced
+arguments that is exactly all the fields of one `$VAR` expansion is rewritten in that
+variable's assignment — but only if every use of the binding, anywhere in the script,
+gets the same change. Then, for each remaining rewritten command, the rewriter tries
+these in order and stops at the first that works:
 
 1. **Word-level edit.** Insert, replace or delete whole source words — only words that
    are literal and produce one field, so quoting is irrelevant.
-2. **Binding edit.** A contiguous run of replaced arguments that is exactly all the
-   fields of one `$VAR` expansion, rewritten in that variable's assignment, but only if
-   every use of the binding gets the same change.
-3. **Inline.** Replace the whole word containing the expansion with the quoted new
+2. **Inline.** Replace the whole word containing the expansion with the quoted new
    values, abandoning the factorization for that one use.
-4. **Regenerate the command's words.** When every value is known and no redirection is
+3. **Regenerate the command's words.** When every value is known and no redirection is
    interleaved, replace the span from the first to the last word of the effective
    command with the quoted new argv.
-5. **Give up on that command.** The other commands in the script are still rewritten.
+4. **Give up on that command.** The other commands in the script are still rewritten.
 
 Environment variables a rule wants to inject become `K=V` before the command, or
 `env K=V` before the effective `argv[0]` when the command is wrapped.

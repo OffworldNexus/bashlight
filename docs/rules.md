@@ -23,7 +23,9 @@ new argv until nothing changes it, a cycle appears, or eight rounds pass — so
 `poetry run poetry run x → poetry run x` is just two rules agreeing. The first `block`
 wins for the whole command.
 
-The five rules bashlight ships with are in `src/rules/builtin/`.
+The five rules bashlight ships with are in `src/rules/builtin/`. They are tried in this
+priority order — `redundant-runner`, `pip-to-manager`, `bare-python`, `python-runner`,
+`node-manager` — and the first one that does not keep a command decides the round.
 
 ## `python-runner`
 
@@ -108,7 +110,10 @@ print(1)
 EOF
 
 $ python main.py
-→ uv run python main.py
+→ uv run main.py
+
+$ python -c 'print(1)'
+→ uv run python -c 'print(1)'
 
 $ pip install requests
 → blocked
@@ -181,7 +186,7 @@ import { NodeFileSystem } from "bashlight";
 
 const files = new NodeFileSystem();
 
-const makeTest: Rule = {
+export const makeTest: Rule = {
     id: "make-test",
     scope: "local",
     inspect(call: CommandCall, context: RuleContext): Verdict {
@@ -208,6 +213,8 @@ in to keep them:
 
 ```ts title="setup.ts"
 import { createBashlight, createBuiltinRules, NodeFileSystem } from "bashlight";
+
+import { makeTest } from "./make-test.ts";
 
 const fileSystem = new NodeFileSystem();
 const processor = createBashlight({

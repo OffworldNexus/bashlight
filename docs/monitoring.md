@@ -71,6 +71,10 @@ Rules:
      7  python-runner
      4  node-manager
 
+Outcomes per day:
+  2026-11-07  rewritten 14  blocked 1  unchanged 4
+  2026-11-08  rewritten 17  blocked 1  unchanged 5
+
 Top rewrites:
     12  pip install → poetry add
      3  npm install → pnpm add
@@ -107,7 +111,7 @@ $ bun bin/bashlight doctor
 ✓ bun 1.3.14
 ✓ opencode opencode v2.2.5
 ✓ plugin discoverability (project: /home/user/dev/shop/.opencode/plugins/bashlight.ts)
-✓ audit log /home/user/.local/share/bashlight/audit.jsonl (2.1 kB, last entry 2026-11-08T15:12:04.117Z)
+✓ audit log /home/user/.local/share/bashlight/audit.jsonl (2103 bytes, last entry 2026-11-08T15:12:04.117Z)
 ✓ self-test: pip install requests → poetry add requests
 ```
 
