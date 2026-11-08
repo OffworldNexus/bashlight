@@ -9,7 +9,8 @@
  * for every third-party module it imports, so that probing a module and then
  * using it both work.
  */
-import { dirname, join, resolve } from "../../shared/posix-path.ts";
+import type { PythonManager } from "../../project/index.ts";
+import { dirname, join, relative, resolve } from "../../shared/posix-path.ts";
 import {
     interpreterVersion,
     isPipCommand,
@@ -28,8 +29,9 @@ import {
     PythonImportScanner,
 } from "../knowledge/python-imports.ts";
 import { resolveScript } from "../knowledge/script-resolver.ts";
+import { isVenvExecutable } from "../knowledge/venv.ts";
 import { isOption } from "../knowledge/words.ts";
-import type { CommandCall, Rule, RuleContext, Verdict } from "../rule.ts";
+import type { CallArg, CommandCall, Rule, RuleContext, Verdict } from "../rule.ts";
 import { argsFrom, block, keep, replace, text } from "../verdict.ts";
 
 export const PIP_OUTSIDE_PROJECT_MESSAGE =
@@ -55,6 +57,9 @@ export class BarePythonRule implements Rule {
         if (context.cwd === undefined) {
             return keep();
         }
+        if (isVenvExecutable(call, context)) {
+            return keep();
+        }
         if (context.project.python(context.cwd) !== undefined) {
             return keep();
         }
@@ -76,7 +81,7 @@ export class BarePythonRule implements Rule {
             return keep();
         }
         if (isPipCommand(python)) {
-            return this.pip(call, python);
+            return this.pip(call, python, context);
         }
         if (!isPythonInterpreter(call.argv[python.toolIndex]?.value)) {
             return keep();
@@ -100,12 +105,34 @@ export class BarePythonRule implements Rule {
         return replace([...prefix, ...argsFrom(call.argv, 0)], UV_REASON);
     }
 
-    private pip(call: CommandCall, python: PythonCommand): Verdict {
+    private pip(
+        call: CommandCall,
+        python: PythonCommand,
+        context: RuleContext,
+    ): Verdict {
         const info = pipSubcommand(call.argv, python);
         if (info?.name !== "install") {
             return keep();
         }
-        return block(PIP_OUTSIDE_PROJECT_MESSAGE);
+        return block(this.pipMessage(call, context));
+    }
+
+    /** Point at a child project when the cwd itself is only a monorepo root. */
+    private pipMessage(call: CommandCall, context: RuleContext): string {
+        const project =
+            context.cwd === undefined
+                ? undefined
+                : findChildProject(context.cwd, context);
+        if (project === undefined) {
+            return PIP_OUTSIDE_PROJECT_MESSAGE;
+        }
+        const command = shellWords(call.argv);
+        return (
+            `This directory is not a Python project, but ${project.relative}/ ` +
+            `is (${MANAGER_LABELS[project.manager]}). Run it there: ` +
+            `\`cd ${project.relative} && ${command}\` — bashlight will use the ` +
+            "project's own tool."
+        );
     }
 
     private interpreter(
@@ -237,4 +264,72 @@ function isLocalModule(
         context.files.exists(join(baseDir, `${module}.py`)) ||
         context.files.isDirectory(join(baseDir, module))
     );
+}
+
+/** How many directory levels below the cwd we search for a Python project. */
+const MAX_PROJECT_DEPTH = 2;
+
+/** Vendored or throwaway directories never hold the project the agent wants. */
+const SKIP_DIRECTORIES: ReadonlySet<string> = new Set([
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+]);
+
+const MANAGER_LABELS: Readonly<Record<PythonManager, string>> = {
+    poetry: "Poetry",
+    uv: "uv",
+    pipenv: "Pipenv",
+    pdm: "PDM",
+    hatch: "Hatch",
+    venv: "virtualenv",
+};
+
+interface ChildProject {
+    /** Path of the project, relative to the cwd. */
+    readonly relative: string;
+    readonly manager: PythonManager;
+}
+
+/** The first Python project root within {@link MAX_PROJECT_DEPTH} below `cwd`. */
+// eslint-disable-next-line sonarjs/function-return-type
+function findChildProject(cwd: string, context: RuleContext): ChildProject | undefined {
+    let level: string[] = [cwd];
+    for (let depth = 0; depth < MAX_PROJECT_DEPTH; depth += 1) {
+        const next: string[] = [];
+        for (const dir of level) {
+            for (const child of childDirectories(dir, context)) {
+                const manager = projectRootAt(child, context);
+                if (manager !== undefined) {
+                    return { relative: relative(cwd, child), manager };
+                }
+                next.push(child);
+            }
+        }
+        level = next;
+    }
+    return undefined;
+}
+
+/** The non-hidden, non-vendored sub-directories of `dir`. */
+function childDirectories(dir: string, context: RuleContext): readonly string[] {
+    return (context.files.listDirectory(dir) ?? [])
+        .filter((name) => !name.startsWith(".") && !SKIP_DIRECTORIES.has(name))
+        .map((name) => join(dir, name))
+        .filter((path) => context.files.isDirectory(path));
+}
+
+/** The manager of the project whose root is exactly `dir`. */
+function projectRootAt(dir: string, context: RuleContext): PythonManager | undefined {
+    const project = context.project.python(dir);
+    return project !== undefined && project.root === dir ? project.manager : undefined;
+}
+
+/** The command's known arguments joined by spaces, for the block message. */
+function shellWords(argv: readonly CallArg[]): string {
+    return argv
+        .map((argument) => argument.value)
+        .filter((value): value is string => value !== undefined)
+        .join(" ");
 }

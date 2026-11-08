@@ -1,4 +1,4 @@
-import { dirname, normalize } from "../shared/posix-path.ts";
+import { basename, dirname, normalize } from "../shared/posix-path.ts";
 import type { FileSystem } from "./file-system.ts";
 
 /**
@@ -34,6 +34,21 @@ export class MemoryFileSystem implements FileSystem {
     readText(path: string): string | undefined {
         const value = this.entries.get(normalize(path));
         return typeof value === "string" ? value : undefined;
+    }
+
+    // eslint-disable-next-line sonarjs/function-return-type
+    listDirectory(path: string): readonly string[] | undefined {
+        const target = normalize(path);
+        if (this.entries.get(target) !== null) {
+            return undefined;
+        }
+        const names: string[] = [];
+        for (const key of this.entries.keys()) {
+            if (key !== target && dirname(key) === target) {
+                names.push(basename(key));
+            }
+        }
+        return names.sort((left, right) => left.localeCompare(right));
     }
 
     readHead(path: string, maxBytes: number): string | undefined {

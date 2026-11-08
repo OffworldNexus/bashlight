@@ -2,6 +2,7 @@ import {
     closeSync,
     existsSync,
     openSync,
+    readdirSync,
     readFileSync,
     readSync,
     statSync,
@@ -41,6 +42,15 @@ export class NodeFileSystem implements FileSystem {
             content = undefined;
         }
         return content;
+    }
+
+    // eslint-disable-next-line sonarjs/function-return-type
+    listDirectory(path: string): readonly string[] | undefined {
+        try {
+            return readdirSync(path).sort((left, right) => left.localeCompare(right));
+        } catch {
+            return undefined;
+        }
     }
 
     readHead(path: string, maxBytes: number): string | undefined {

@@ -10,10 +10,7 @@
  * triple-quoted blocks, splits `;`-joined statements, and never throws.
  * Anything it cannot read is simply not reported.
  */
-import {
-    PYTHON_AMBIGUOUS_MODULES,
-    PYTHON_DISTRIBUTIONS,
-} from "./data/python-distributions.ts";
+import { PYTHON_DISTRIBUTIONS } from "./data/python-distributions.ts";
 import { PYTHON_STDLIB_MODULE_NAMES } from "./data/python-stdlib.ts";
 
 type Token =
@@ -63,13 +60,13 @@ export function isStdlibModule(name: string): boolean {
 }
 
 /**
- * The PyPI distribution providing `module`, or `undefined` when the top-level
- * name is shared by several unrelated packages and cannot be guessed.
+ * The PyPI distribution providing `module`, or `undefined` when it is not in
+ * the curated allow-list. Guessing the import name as the distribution is
+ * deliberately avoided: an unknown import gets no dependency at all rather
+ * than a wrong one.
  */
 export function distributionFor(module: string): string | undefined {
-    return PYTHON_AMBIGUOUS_MODULES.has(module)
-        ? undefined
-        : (PYTHON_DISTRIBUTIONS[module] ?? module);
+    return PYTHON_DISTRIBUTIONS[module];
 }
 
 /** Whether `text` is a PEP 723 script (a `# /// script` block). */

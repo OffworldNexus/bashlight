@@ -33,3 +33,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"usage: uv-cli {{{names}}} [args...]", file=sys.stderr)
         return 2
     return COMMANDS[args[0]](args[1:])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

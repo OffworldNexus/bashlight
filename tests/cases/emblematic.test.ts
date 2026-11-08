@@ -37,7 +37,7 @@ const CASES_PATH = fileURLToPath(new URL("./emblematic.jsonl", import.meta.url))
 type Expected =
     | { readonly kind: "rewritten"; readonly command: string }
     | { readonly kind: "unchanged" }
-    | { readonly kind: "blocked" };
+    | { readonly kind: "blocked"; readonly message?: string };
 
 interface EmblematicCase {
     readonly name: string;
@@ -46,6 +46,21 @@ interface EmblematicCase {
     readonly command: string;
     readonly expected: Expected;
     readonly knownIssue?: string;
+}
+
+/** A monorepo root whose only Python project is `api/` below. */
+function monorepoProject(root: string): Fixtures {
+    return poetryProject(`${root}/api`);
+}
+
+/** A uv project whose `.venv/bin` holds a Python console script. */
+function uvVenvProject(root: string): Fixtures {
+    return {
+        ...uvProject(root),
+        [`${root}/.venv/pyvenv.cfg`]: "home = /usr/bin\n",
+        [`${root}/.venv/bin/python`]: "",
+        [`${root}/.venv/bin/pytest`]: `#!${root}/.venv/bin/python\n`,
+    };
 }
 
 const BUILDERS: Readonly<Record<string, (root: string) => Fixtures>> = {
@@ -58,6 +73,8 @@ const BUILDERS: Readonly<Record<string, (root: string) => Fixtures>> = {
     bun: bunProject,
     tsx: tsxProject,
     none: noProject,
+    monorepo: monorepoProject,
+    uvvenv: uvVenvProject,
 };
 
 function loadCases(): EmblematicCase[] {
@@ -100,8 +117,14 @@ function parseCase(line: string): EmblematicCase {
 
 function parseExpected(value: unknown, line: string): Expected {
     if (isRecord(value)) {
-        if (value["kind"] === "unchanged" || value["kind"] === "blocked") {
-            return { kind: value["kind"] };
+        if (value["kind"] === "unchanged") {
+            return { kind: "unchanged" };
+        }
+        if (value["kind"] === "blocked") {
+            const message = value["message"];
+            return typeof message === "string"
+                ? { kind: "blocked", message }
+                : { kind: "blocked" };
         }
         if (value["kind"] === "rewritten" && typeof value["command"] === "string") {
             return { kind: "rewritten", command: value["command"] };
@@ -127,7 +150,10 @@ function runCase(testCase: EmblematicCase): Expected {
         return { kind: "rewritten", command: outcome.command };
     }
     if (outcome.kind === "blocked") {
-        return { kind: "blocked" };
+        return testCase.expected.kind === "blocked" &&
+            testCase.expected.message !== undefined
+            ? { kind: "blocked", message: outcome.message }
+            : { kind: "blocked" };
     }
     return { kind: "unchanged" };
 }

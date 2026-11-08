@@ -7,6 +7,7 @@
  */
 import { parseNodeCommand } from "../knowledge/node-command-line.ts";
 import { parsePythonCommand } from "../knowledge/python-command-line.ts";
+import { isVenvExecutable } from "../knowledge/venv.ts";
 import type { CommandCall, Rule, RuleContext, Verdict } from "../rule.ts";
 import { argsFrom, keep, replace } from "../verdict.ts";
 
@@ -16,6 +17,9 @@ export class RedundantRunnerRule implements Rule {
 
     inspect(call: CommandCall, context: RuleContext): Verdict {
         if (context.cwd === undefined) {
+            return keep();
+        }
+        if (isVenvExecutable(call, context)) {
             return keep();
         }
         return this.python(call) ?? this.node(call) ?? keep();

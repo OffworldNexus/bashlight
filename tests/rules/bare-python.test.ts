@@ -239,11 +239,51 @@ describe("bare-python — import-aware", () => {
     });
 
     test("past the cap the plain run is kept", () => {
-        const modules = Array.from({ length: 11 }, (_, index) => `pkg${index}`);
+        const modules = [
+            "numpy",
+            "pandas",
+            "requests",
+            "httpx",
+            "rich",
+            "click",
+            "typer",
+            "pydantic",
+            "fastapi",
+            "flask",
+            "django",
+        ];
         const code = `import ${modules.join(", ")}`;
         expect(given().run("python", "-c", code)).toEqual(
             rewritten(["uv", "run", "python", "-c", code]),
         );
+    });
+
+    test("an unknown module gets no --with", () => {
+        const code = "import mysterylib";
+        expect(given().run("python", "-c", code)).toEqual(
+            rewritten(["uv", "run", "python", "-c", code]),
+        );
+    });
+
+    test("slugify maps to python-slugify, not the unrelated package", () => {
+        const code = "import slugify; print(slugify.__version__)";
+        expect(given().run("python3", "-c", code)).toEqual(
+            rewritten(["uv", "run", "--with", "python-slugify", "python", "-c", code]),
+        );
+    });
+
+    test("a mixed snippet keeps the known imports and skips the unknown", () => {
+        const code = "import mysterylib\nimport requests\nimport os";
+        expect(given().run("python", "-c", code)).toEqual(
+            rewritten(["uv", "run", "--with", "requests", "python", "-c", code]),
+        );
+    });
+
+    test("a script with known and unknown imports keeps only the known", () => {
+        const script = "import mysterylib\nfrom PIL import Image\n";
+        expect(
+            given({ "/w/probe.py": script }).at("/w").run("python", "probe.py"),
+        ).toEqual(rewritten(["uv", "run", "--with", "pillow", "probe.py"]));
     });
 
     test("levenshtein and other mapped names are used as distributions", () => {
@@ -257,6 +297,67 @@ describe("bare-python — import-aware", () => {
                 "-c",
                 "import Levenshtein",
             ]),
+        );
+    });
+});
+
+describe("bare-python — monorepo pip block", () => {
+    const POETRY_CHILD = {
+        "/w/api/pyproject.toml": `[tool.poetry]\nname = "api"\nversion = "0.1.0"\n`,
+        "/w/api/poetry.lock": "",
+    };
+
+    test("points at a Poetry project one level down", () => {
+        expect(
+            given(POETRY_CHILD)
+                .at("/w")
+                .run("pip", "install", "pytest", "python-slugify"),
+        ).toEqual(
+            blocked(
+                "This directory is not a Python project, but api/ is (Poetry). " +
+                    "Run it there: `cd api && pip install pytest python-slugify` " +
+                    "— bashlight will use the project's own tool.",
+            ),
+        );
+    });
+
+    test("names the child project's manager", () => {
+        const files = {
+            "/w/api/pyproject.toml": `[project]\nname = "api"\nversion = "0.1.0"\n`,
+            "/w/api/uv.lock": "",
+        };
+        expect(given(files).at("/w").run("pip", "install", "x")).toEqual(
+            blocked(
+                "This directory is not a Python project, but api/ is (uv). " +
+                    "Run it there: `cd api && pip install x` — bashlight will " +
+                    "use the project's own tool.",
+            ),
+        );
+    });
+
+    test("finds a project two levels down", () => {
+        const files = {
+            "/w/services/api/pyproject.toml": `[tool.poetry]\nname = "a"\nversion = "0"\n`,
+            "/w/services/api/poetry.lock": "",
+        };
+        expect(given(files).at("/w").run("pip", "install", "x")).toEqual(
+            blocked(
+                "This directory is not a Python project, but services/api/ is " +
+                    "(Poetry). Run it there: `cd services/api && pip install x` " +
+                    "— bashlight will use the project's own tool.",
+            ),
+        );
+    });
+
+    test("ignores hidden, vendored and deeper directories", () => {
+        const files = {
+            "/w/.hidden/pyproject.toml": `[tool.poetry]\nname = "x"\nversion = "0"\n`,
+            "/w/.hidden/poetry.lock": "",
+            "/w/node_modules/pkg/pyproject.toml": `[project]\nname = "x"\nversion = "0"\n`,
+            "/w/a/b/c/pyproject.toml": `[project]\nname = "x"\nversion = "0"\n`,
+        };
+        expect(given(files).at("/w").run("pip", "install", "x")).toEqual(
+            blocked(PIP_OUTSIDE_PROJECT_MESSAGE),
         );
     });
 });

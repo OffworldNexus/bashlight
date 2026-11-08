@@ -116,6 +116,24 @@ export class FakeCliFiles implements CliFiles {
         return text === undefined ? undefined : text.slice(0, maxBytes);
     }
 
+    listDirectory(path: string): readonly string[] | undefined {
+        const prefix = path.endsWith("/") ? path : `${path}/`;
+        const names = new Set<string>();
+        let isDirectory = this.entries.get(path) === null;
+        for (const key of this.entries.keys()) {
+            if (!key.startsWith(prefix)) {
+                continue;
+            }
+            isDirectory = true;
+            const rest = key.slice(prefix.length);
+            const slash = rest.indexOf("/");
+            names.add(slash === -1 ? rest : rest.slice(0, slash));
+        }
+        return isDirectory
+            ? [...names].sort((left, right) => left.localeCompare(right))
+            : undefined;
+    }
+
     size(path: string): number | undefined {
         const value = this.entries.get(path);
         return typeof value === "string" ? value.length : undefined;

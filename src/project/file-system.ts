@@ -10,6 +10,12 @@ export interface FileSystem {
     isDirectory(path: string): boolean;
     readText(path: string): string | undefined;
     /**
+     * The names of the entries (files and sub-directories, not paths) directly
+     * inside `path`, or `undefined` when it cannot be listed. A missing path,
+     * a file, or an unreadable directory degrades to `undefined`.
+     */
+    listDirectory(path: string): readonly string[] | undefined;
+    /**
      * The first `maxBytes` of `path`, or `undefined` when it cannot be read.
      * Used to read shebangs without loading whole (possibly binary) files.
      * "maxBytes" is approximate: `MemoryFileSystem` slices UTF-16 code units,

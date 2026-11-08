@@ -108,15 +108,20 @@ describe("distributionFor", () => {
         expect(distributionFor("dateutil")).toBe("python-dateutil");
         expect(distributionFor("Crypto")).toBe("pycryptodome");
         expect(distributionFor("Levenshtein")).toBe("levenshtein");
+        expect(distributionFor("slugify")).toBe("python-slugify");
     });
 
-    test("the default is the import name itself", () => {
+    test("identity entries are listed explicitly", () => {
         expect(distributionFor("requests")).toBe("requests");
         expect(distributionFor("numpy")).toBe("numpy");
+        expect(distributionFor("httpx")).toBe("httpx");
+        expect(distributionFor("django")).toBe("django");
     });
 
-    test("ambiguous names are skipped", () => {
+    test("unknown and ambiguous names are skipped", () => {
         expect(distributionFor("google")).toBeUndefined();
+        expect(distributionFor("mysterylib")).toBeUndefined();
+        expect(distributionFor("projecthelpers")).toBeUndefined();
     });
 });
 

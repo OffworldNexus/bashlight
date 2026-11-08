@@ -104,8 +104,8 @@ Outside any Python project, Python has no environment to run in: `python` become
 
 Because a bare `uv run python` gets an empty ephemeral environment, the rule reads the
 code it is about to run — a `-c` snippet, a script file, a heredoc/herestring on stdin,
-or a `-m` module — and adds `--with <dist>` for every **third-party** module it imports.
-So probing a module and then using it agree:
+or a `-m` module — and adds `--with <dist>` for the imports whose distribution it knows
+**with confidence**. So probing a module and then using it agree:
 
 ```bash
 $ python3 - <<'EOF'
@@ -117,6 +117,9 @@ EOF
 
 $ python3 -c 'import cairosvg'
 → uv run --with cairosvg python -c 'import cairosvg'
+
+$ python3 -c 'import slugify'     # the package is python-slugify, not slugify
+→ uv run --with python-slugify python -c 'import slugify'
 
 $ python3 - <<'EOF'
 import requests
@@ -136,21 +139,41 @@ $ python probe.py          # probe.py imports cairosvg
 $ python main.py
 → uv run main.py
 
-$ python -c 'import os, sys'   # stdlib only: no --with
+$ python -c 'import os, sys'       # stdlib only: no --with
 → uv run python -c 'import os, sys'
+
+$ python -c 'import mysterylib'    # unknown distribution: no --with
+→ uv run python -c 'import mysterylib'
 
 $ pip install requests
 → blocked
 ```
 
-Standard-library imports add nothing, local modules (`<name>.py` or `<name>/` next to
-the code) are not downloaded, well-known import/distribution mismatches are mapped
-(`PIL` → `pillow`, `cv2` → `opencv-python`, `yaml` → `pyyaml`, …), and past ten
-dependencies the plain run is kept. A script that already carries a PEP 723
-`# /// script` block is left to `uv` as-is.
+Standard-library imports add nothing and local modules (`<name>.py` or `<name>/` next to
+the code) are not downloaded. `--with` is only added for a curated list of imports whose
+distribution is known with confidence, which maps the common mismatches (`PIL` →
+`pillow`, `slugify` → `python-slugify`, `cv2` → `opencv-python`, `yaml` → `pyyaml`, …).
+An import outside that list — including a top-level name shared by several popular
+packages, such as `google` — gets nothing: guessing would install the wrong library, so
+the probe answers "no", honestly. Past ten dependencies the plain run is kept. A script
+that already carries a PEP 723 `# /// script` block is left to `uv` as-is.
 
-The block message points at the three ways to run a one-off dependency under `uv`: a PEP
-723 script, `uv run --with <pkg> python …`, or `uvx <tool>`.
+The block message first looks for a Python project in nearby child directories (depth ≤
+2, skipping hidden and vendored ones). If it finds one, it points there instead:
+
+```console
+$ pip install pytest python-slugify      # at a monorepo root with api/ below
+→ blocked:
+  This directory is not a Python project, but api/ is (Poetry). Run it there:
+  `cd api && pip install pytest python-slugify` — bashlight will use the project's own tool.
+```
+
+Otherwise it keeps the PEP 723 guidance: a PEP 723 script,
+`uv run --with <pkg> python …`, or `uvx <tool>`.
+
+An explicit executable inside a virtualenv's `bin` (`.venv/bin/pytest`,
+`venv/bin/python`, an absolute `…/venv/bin/mypy`) is always left untouched: it already
+names the exact interpreter the project wants, so no rule routes it through a runner.
 
 ## `node-manager`
 

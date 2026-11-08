@@ -44,4 +44,17 @@ describe("MemoryFileSystem", () => {
         expect(fs.readHead("/w", 10)).toBeUndefined();
         expect(fs.readHead("/missing", 10)).toBeUndefined();
     });
+
+    test("listDirectory lists immediate children and never throws", () => {
+        const fs = new MemoryFileSystem({
+            "/w/api/pyproject.toml": "x",
+            "/w/readme.md": "y",
+            "/w/api/nested/deep.py": "z",
+        });
+        expect(fs.listDirectory("/w")).toEqual(["api", "readme.md"]);
+        expect(fs.listDirectory("/w/api")).toEqual(["nested", "pyproject.toml"]);
+        expect(fs.listDirectory("/w/api/pyproject.toml")).toBeUndefined();
+        expect(fs.listDirectory("/missing")).toBeUndefined();
+        expect(fs.listDirectory("/")).toEqual(["w"]);
+    });
 });

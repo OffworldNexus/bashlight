@@ -2,13 +2,14 @@
 /**
  * The benchmark's projects and their tasks.
  *
- * Each entry pairs a committed template under `bench/projects/<name>/` with the
- * prompt the agent receives and a checker that decides success from the
- * project's own commands plus a few declaration checks. The prompts describe
- * the *goal*, never the toolchain, so whether bashlight rewrites the agent's
- * commands is left to the model. Several projects are multi-step and
- * multi-toolchain on purpose: the friction (wrong manager, wrong working
- * directory, wrong interpreter) is what the benchmark measures.
+ * A prompt states the whole spec: the libraries a feature must use, the
+ * function and file names, the commands and output files, and the checks that
+ * must pass. It never states *how* to reach them — no package manager, runner
+ * or interpreter is named, so discovering the toolchain (and whether bashlight
+ * rewrites the commands) is left to the model.
+ *
+ * Each checker collects **every** failing condition, not just the first, so a
+ * failed run is easy to analyse.
  */
 
 import type { CommandResult } from "./lib/command.ts";
@@ -43,28 +44,37 @@ function command(
         : { command: executable, args, cwd };
 }
 
-/** The lines of a `[section]` in a TOML document, up to the next header. */
-function tomlSection(text: string, header: string): string {
-    const lines = text.split("\n");
-    const start = lines.findIndex((line) => line.trim() === header);
-    if (start === -1) {
-        return "";
-    }
-    const body: string[] = [];
-    for (let index = start + 1; index < lines.length; index += 1) {
-        const line = lines[index] ?? "";
-        if (/^\s*\[/.test(line)) {
-            break;
-        }
-        body.push(line);
-    }
-    return body.join("\n");
+/** One failing condition, with the output of the command that failed. */
+interface Failure {
+    readonly message: string;
+    readonly output?: string;
 }
 
-/** Whether a TOML section mentions a package, ignoring case and separators. */
-function sectionDeclares(section: string, name: string): boolean {
+/** The last lines of a command's output, for the failure detail. */
+function outputTail(result: CommandResult): string {
+    return `${result.stdout}\n${result.stderr}`.trim().split("\n").slice(-8).join("\n");
+}
+
+/** Turns the collected failures into a {@link CheckResult}, or success. */
+function verdict(failures: readonly Failure[], successDetail: string): CheckResult {
+    if (failures.length === 0) {
+        return { success: true, detail: successDetail };
+    }
+    const lines = failures.flatMap((failure) =>
+        failure.output === undefined || failure.output === ""
+            ? [failure.message]
+            : [
+                  failure.message,
+                  ...failure.output.split("\n").map((line) => `    ${line}`),
+              ],
+    );
+    return { success: false, detail: lines.join("\n") };
+}
+
+/** Whether a manifest mentions a package, ignoring case and separators. */
+function declares(text: string, name: string): boolean {
     const normalise = (value: string) => value.toLowerCase().replaceAll(/[_.]/g, "-");
-    return normalise(section).includes(normalise(name));
+    return normalise(text).includes(normalise(name));
 }
 
 /** Directories a checker never needs to walk into. */
@@ -112,6 +122,25 @@ function anyFileContains(
     );
 }
 
+/** Whether a path looks like a Python test. */
+function isPythonTest(path: string): boolean {
+    const name = path.split("/").pop() ?? "";
+    return (
+        path.includes("/tests/") ||
+        name.startsWith("test_") ||
+        name.endsWith("_test.py")
+    );
+}
+
+/** Whether a path looks like a TypeScript test. */
+function isTypeScriptTest(path: string): boolean {
+    return (
+        path.includes("/tests/") ||
+        path.endsWith(".test.ts") ||
+        path.endsWith(".spec.ts")
+    );
+}
+
 /** Reads a JSON file, or `undefined` when it is missing or malformed. */
 function readJson(
     fs: BenchFileSystem,
@@ -131,7 +160,7 @@ function readJson(
     }
 }
 
-/** Whether a package.json declares a dependency. */
+/** Whether a package.json declares a dependency (runtime or dev). */
 function packageDeclares(manifest: Record<string, unknown>, name: string): boolean {
     for (const field of ["dependencies", "devDependencies"]) {
         const group = manifest[field];
@@ -145,19 +174,6 @@ function packageDeclares(manifest: Record<string, unknown>, name: string): boole
         }
     }
     return false;
-}
-
-/** Reports a failed check with the command output for context. */
-function failed(detail: string, result?: CommandResult): CheckResult {
-    if (result === undefined) {
-        return { success: false, detail };
-    }
-    const tail = `${result.stdout}\n${result.stderr}`
-        .trim()
-        .split("\n")
-        .slice(-8)
-        .join("\n");
-    return { success: false, detail: `${detail}\n${tail}` };
 }
 
 /** Splits one CSV line, honouring double-quoted fields. */
@@ -209,6 +225,12 @@ export function parseCsv(text: string): readonly Record<string, string>[] {
     });
 }
 
+/** The header cells of a CSV document, lower-cased. */
+function csvHeader(text: string): readonly string[] {
+    const first = text.trim().split(/\r?\n/)[0] ?? "";
+    return splitCsvLine(first).map((cell) => cell.trim().toLowerCase());
+}
+
 /** The expected records of `scripts/data.yaml`, in order. */
 const INVENTORY_ROWS: readonly Record<string, string>[] = [
     { name: "Ada", role: "admin" },
@@ -220,109 +242,133 @@ const monorepo: TaskDefinition = {
     project: "monorepo",
     prompt:
         "This repository has a Python API under `api/` and a web client under `web/`. " +
-        "Add an `endpoint_path(name)` helper to the API (`api/api/routes.py`) that turns " +
-        "a route name into a URL path using the python-slugify library, and a matching " +
-        "`parseEndpoint(payload)` helper to the web client (`web/src/client.ts`) that " +
-        "validates an endpoint response using the zod library. Write tests for both " +
-        "helpers and make sure both test suites pass.",
+        "Add an `endpoint_path(name)` helper to `api/api/routes.py` that turns a route " +
+        "name into a URL path using the python-slugify library, and a `parseEndpoint(payload)` " +
+        "helper to `web/src/client.ts` that validates an endpoint response using the zod " +
+        "library. Write tests for both helpers and make sure both test suites pass.",
     install: [
         command("poetry", ["install", "--no-interaction"], "api"),
         command("pnpm", ["install", "--frozen-lockfile"], "web"),
     ],
     async check(context) {
+        const failures: Failure[] = [];
         const api = await context.run(
             command("poetry", ["run", "pytest", "-q"], "api"),
         );
         if (api.code !== 0) {
-            return failed("the API test suite did not pass", api);
+            failures.push({
+                message: "the API test suite did not pass",
+                output: outputTail(api),
+            });
         }
         const web = await context.run(command("pnpm", ["test"], "web"));
         if (web.code !== 0) {
-            return failed("the web test suite did not pass", web);
+            failures.push({
+                message: "the web test suite did not pass",
+                output: outputTail(web),
+            });
         }
         const pyproject = context.fs.readFile(
             `${context.projectDirectory}/api/pyproject.toml`,
         );
-        if (
-            pyproject === undefined ||
-            !sectionDeclares(
-                tomlSection(pyproject, "[tool.poetry.dependencies]"),
-                "python-slugify",
-            )
-        ) {
-            return failed("python-slugify is not declared in the API pyproject.toml");
+        if (pyproject === undefined || !declares(pyproject, "python-slugify")) {
+            failures.push({
+                message: "python-slugify is not declared in api/pyproject.toml",
+            });
         }
         const manifest = readJson(
             context.fs,
             `${context.projectDirectory}/web/package.json`,
         );
         if (manifest === undefined || !packageDeclares(manifest, "zod")) {
-            return failed("zod is not declared in web/package.json");
+            failures.push({ message: "zod is not declared in web/package.json" });
         }
         if (
             !anyFileContains(
                 context.fs,
-                `${context.projectDirectory}/api/tests`,
-                (path) => path.endsWith(".py"),
-                "endpoint",
+                `${context.projectDirectory}/api`,
+                (path) => path.endsWith(".py") && isPythonTest(path),
+                "endpoint_path",
             )
         ) {
-            return failed("no API test references the endpoint helper");
+            failures.push({ message: "no API test references endpoint_path" });
         }
         if (
             !anyFileContains(
                 context.fs,
-                `${context.projectDirectory}/web/tests`,
-                (path) => path.endsWith(".ts"),
+                `${context.projectDirectory}/web`,
+                (path) => path.endsWith(".ts") && isTypeScriptTest(path),
                 "parseEndpoint",
             )
         ) {
-            return failed("no web test references parseEndpoint");
+            failures.push({ message: "no web test references parseEndpoint" });
         }
-        return {
-            success: true,
-            detail: "both suites pass and both dependencies are declared",
-        };
+        return verdict(failures, "both suites pass and both dependencies are declared");
     },
 };
 
 const uvCli: TaskDefinition = {
     project: "uv-cli",
     prompt:
-        "Add two subcommands to this command line tool: `table` renders the rows in " +
-        "`data.csv` as a text table, and `config` prints the values from " +
-        "`config.yaml`. Add tests for both and make sure the test suite, Ruff and " +
-        "mypy all pass.",
+        "This repository is a small command line tool. Add two subcommands: `table`, " +
+        "which renders the rows in `data.csv` as a text table using the tabulate " +
+        "library, and `config`, which prints the values from `config.yaml` using the " +
+        "PyYAML library. Add tests for both, and make the test suite, Ruff and mypy " +
+        "all pass.",
     install: [command("uv", ["sync", "--no-progress"])],
     async check(context) {
+        const failures: Failure[] = [];
         const tests = await context.run(command("uv", ["run", "pytest", "-q"]));
         if (tests.code !== 0) {
-            return failed("pytest did not pass", tests);
+            failures.push({
+                message: "pytest did not pass",
+                output: outputTail(tests),
+            });
         }
         const lint = await context.run(command("uv", ["run", "ruff", "check"]));
         if (lint.code !== 0) {
-            return failed("ruff check did not pass", lint);
+            failures.push({
+                message: "ruff check did not pass",
+                output: outputTail(lint),
+            });
         }
         const types = await context.run(command("uv", ["run", "mypy"]));
         if (types.code !== 0) {
-            return failed("mypy did not pass", types);
+            failures.push({ message: "mypy did not pass", output: outputTail(types) });
+        }
+        const table = await context.run(
+            command("uv", ["run", "python", "-m", "uvcli.cli", "table"]),
+        );
+        if (table.code !== 0 || !table.stdout.toLowerCase().includes("widget")) {
+            failures.push({
+                message: "`table` did not print the rows in data.csv",
+                output: outputTail(table),
+            });
+        }
+        const config = await context.run(
+            command("uv", ["run", "python", "-m", "uvcli.cli", "config"]),
+        );
+        if (config.code !== 0 || !config.stdout.toLowerCase().includes("retries")) {
+            failures.push({
+                message: "`config` did not print the values in config.yaml",
+                output: outputTail(config),
+            });
         }
         const pyproject = context.fs.readFile(
             `${context.projectDirectory}/pyproject.toml`,
         );
         if (pyproject === undefined) {
-            return failed("pyproject.toml is missing");
-        }
-        const project = tomlSection(pyproject, "[project]");
-        for (const name of ["tabulate", "pyyaml"]) {
-            if (!sectionDeclares(project, name)) {
-                return failed(`${name} is not declared in the [project] dependencies`);
+            failures.push({ message: "pyproject.toml is missing" });
+        } else {
+            for (const name of ["tabulate", "pyyaml"]) {
+                if (!declares(pyproject, name)) {
+                    failures.push({
+                        message: `${name} is not declared in pyproject.toml`,
+                    });
+                }
             }
         }
-        return {
-            success: true,
-            detail: "tests, ruff and mypy pass; both libraries declared",
-        };
+        return verdict(failures, "tests, ruff and mypy pass; both libraries declared");
     },
 };
 
@@ -332,109 +378,127 @@ const poetryDjangoLite: TaskDefinition = {
         "This project has an executable `./manage.py` that exposes a few " +
         "management-style commands. Add a `report` command that reads " +
         "`data/inventory.yaml` with the PyYAML library and writes the inventory to " +
-        "`out/inventory.csv`. Cover it with tests, make the test suite pass, and run " +
-        "the command so the output file exists.",
+        "`out/inventory.csv` as a CSV with a header row and one row per item, keeping " +
+        "the `sku`, `name` and `qty` fields. Cover the command with tests, make the " +
+        "test suite pass, and run `./manage.py report` so the output file exists.",
     install: [command("poetry", ["install", "--no-interaction"])],
     async check(context) {
+        const failures: Failure[] = [];
         const tests = await context.run(command("poetry", ["run", "pytest", "-q"]));
         if (tests.code !== 0) {
-            return failed("the test suite did not pass", tests);
+            failures.push({
+                message: "the test suite did not pass",
+                output: outputTail(tests),
+            });
         }
         const pyproject = context.fs.readFile(
             `${context.projectDirectory}/pyproject.toml`,
         );
-        if (
-            pyproject === undefined ||
-            !sectionDeclares(
-                tomlSection(pyproject, "[tool.poetry.dependencies]"),
-                "pyyaml",
-            )
-        ) {
-            return failed("pyyaml is not declared in pyproject.toml");
+        if (pyproject === undefined || !declares(pyproject, "pyyaml")) {
+            failures.push({ message: "pyyaml is not declared in pyproject.toml" });
         }
         if (
             !anyFileContains(
                 context.fs,
-                `${context.projectDirectory}/tests`,
-                (path) => path.endsWith(".py"),
+                context.projectDirectory,
+                (path) => path.endsWith(".py") && isPythonTest(path),
                 "report",
             )
         ) {
-            return failed("no test references the report command");
+            failures.push({ message: "no test references the report command" });
         }
         const run = await context.run(
             command("poetry", ["run", "./manage.py", "report"]),
         );
         if (run.code !== 0) {
-            return failed("./manage.py report did not succeed", run);
+            failures.push({
+                message: "./manage.py report did not succeed",
+                output: outputTail(run),
+            });
         }
         const output = context.fs.readFile(
             `${context.projectDirectory}/out/inventory.csv`,
         );
         if (output === undefined) {
-            return failed("out/inventory.csv was not produced");
+            failures.push({ message: "out/inventory.csv was not produced" });
+        } else {
+            const header = csvHeader(output);
+            for (const field of ["sku", "name", "qty"]) {
+                if (!header.includes(field)) {
+                    failures.push({
+                        message: `out/inventory.csv has no '${field}' column (header: ${header.join(", ")})`,
+                    });
+                }
+            }
+            const rows = parseCsv(output);
+            const names = rows.map((row) => row.name ?? "");
+            if (
+                rows.length !== 2 ||
+                !names.some((name) => name === "Widget") ||
+                !names.some((name) => name === "Gadget")
+            ) {
+                failures.push({
+                    message: `out/inventory.csv has unexpected rows: ${JSON.stringify(rows)}`,
+                });
+            }
         }
-        const rows = parseCsv(output);
-        const names = rows.map((row) => row.name ?? "");
-        if (
-            rows.length !== 2 ||
-            !names.some((name) => name === "Widget") ||
-            !names.some((name) => name === "Gadget")
-        ) {
-            return failed(
-                `out/inventory.csv has unexpected rows: ${JSON.stringify(rows)}`,
-            );
-        }
-        return {
-            success: true,
-            detail: "tests pass, pyyaml declared, report produced the CSV",
-        };
+        return verdict(
+            failures,
+            "tests pass, pyyaml declared, report produced the CSV",
+        );
     },
 };
 
 const scripts: TaskDefinition = {
     project: "scripts",
     prompt:
-        "Convert `data.yaml` into `data.csv`. Write a Python script that reads the " +
-        "YAML and writes the CSV, run it so `data.csv` exists, and keep the script in " +
-        "the repository.",
+        "Convert `data.yaml` into `data.csv` using the PyYAML library: write a Python " +
+        "script that reads the YAML file and writes a CSV with a header row and one row " +
+        "per entry, keeping its `name` and `role` fields. Run the script so `data.csv` " +
+        "exists, and keep the script in the repository.",
     install: [],
     check(context) {
+        const failures: Failure[] = [];
         const output = context.fs.readFile(`${context.projectDirectory}/data.csv`);
         if (output === undefined) {
-            return failed("data.csv was not produced");
-        }
-        const rows = parseCsv(output);
-        if (rows.length !== INVENTORY_ROWS.length) {
-            return failed(
-                `data.csv has ${rows.length} rows, expected ${INVENTORY_ROWS.length}`,
-            );
-        }
-        for (let index = 0; index < INVENTORY_ROWS.length; index += 1) {
-            const expected = INVENTORY_ROWS[index];
-            const actual = rows[index];
-            if (
-                expected === undefined ||
-                actual === undefined ||
-                actual.name !== expected.name ||
-                actual.role !== expected.role
-            ) {
-                return failed(`data.csv row ${index + 1} does not match data.yaml`);
+            failures.push({ message: "data.csv was not produced" });
+        } else {
+            const rows = parseCsv(output);
+            if (rows.length !== INVENTORY_ROWS.length) {
+                failures.push({
+                    message: `data.csv has ${rows.length} rows, expected ${INVENTORY_ROWS.length}`,
+                });
+            } else {
+                for (let index = 0; index < INVENTORY_ROWS.length; index += 1) {
+                    const expected = INVENTORY_ROWS[index];
+                    const actual = rows[index];
+                    if (
+                        expected === undefined ||
+                        actual === undefined ||
+                        actual.name !== expected.name ||
+                        actual.role !== expected.role
+                    ) {
+                        failures.push({
+                            message: `data.csv row ${index + 1} does not match data.yaml`,
+                        });
+                    }
+                }
             }
         }
-        const scriptFound = anyFileContains(
-            context.fs,
-            context.projectDirectory,
-            (path) => path.endsWith(".py"),
-            "yaml",
-        );
-        if (!scriptFound) {
-            return failed("no Python script referencing yaml was kept");
+        if (
+            !anyFileContains(
+                context.fs,
+                context.projectDirectory,
+                (path) => path.endsWith(".py"),
+                "yaml",
+            )
+        ) {
+            failures.push({ message: "no Python script using yaml was kept" });
         }
-        return {
-            success: true,
-            detail: "data.csv matches data.yaml and the script is present",
-        };
+        return verdict(
+            failures,
+            "data.csv matches data.yaml and the script is present",
+        );
     },
 };
 
@@ -442,46 +506,47 @@ const pnpmWeb: TaskDefinition = {
     project: "pnpm-web",
     prompt:
         "Add two utilities to this web package: `formatRelative(date, now)` in " +
-        "`src/time.ts`, which formats how long ago a date was relative to `now` using " +
-        "dayjs and its relativeTime plugin, and `parseItem(payload)` in " +
-        "`src/schema.ts`, which validates an item object with zod. Add vitest tests " +
-        "for both and make sure the tests, the type checker and the linter all pass.",
+        "`src/time.ts`, which returns how long ago a date was relative to `now` using " +
+        "dayjs and its relativeTime plugin, and `parseItem(payload)` in `src/schema.ts`, " +
+        "which validates an item object using zod. Add vitest tests for both, and make " +
+        "the tests, the type checker and the linter all pass.",
     install: [command("pnpm", ["install", "--frozen-lockfile"])],
     async check(context) {
+        const failures: Failure[] = [];
         const tests = await context.run(command("pnpm", ["test"]));
         if (tests.code !== 0) {
-            return failed("pnpm test did not pass", tests);
+            failures.push({
+                message: "pnpm test did not pass",
+                output: outputTail(tests),
+            });
         }
         const types = await context.run(command("pnpm", ["exec", "tsc", "--noEmit"]));
         if (types.code !== 0) {
-            return failed("tsc --noEmit did not pass", types);
+            failures.push({
+                message: "tsc --noEmit did not pass",
+                output: outputTail(types),
+            });
         }
         const lint = await context.run(command("pnpm", ["exec", "eslint", "."]));
         if (lint.code !== 0) {
-            return failed("eslint did not pass", lint);
+            failures.push({ message: "eslint did not pass", output: outputTail(lint) });
         }
         const manifest = readJson(
             context.fs,
             `${context.projectDirectory}/package.json`,
         );
         if (manifest === undefined) {
-            return failed("package.json is missing");
-        }
-        for (const name of ["dayjs", "zod"]) {
-            if (!packageDeclares(manifest, name)) {
-                return failed(`${name} is not declared in package.json`);
+            failures.push({ message: "package.json is missing" });
+        } else {
+            for (const name of ["dayjs", "zod"]) {
+                if (!packageDeclares(manifest, name)) {
+                    failures.push({
+                        message: `${name} is not declared in package.json`,
+                    });
+                }
             }
         }
-        const stray = ["package-lock.json", "yarn.lock"].filter((name) =>
-            context.fs.exists(`${context.projectDirectory}/${name}`),
-        );
-        if (stray.length > 0) {
-            return failed(`unexpected lockfile(s): ${stray.join(", ")}`);
-        }
-        return {
-            success: true,
-            detail: "tests, types and lint pass; dayjs and zod declared",
-        };
+        return verdict(failures, "tests, types and lint pass; dayjs and zod declared");
     },
 };
 

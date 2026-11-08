@@ -76,4 +76,11 @@ describe("NodeFileSystem", () => {
         expect(fs.readHead(join(root, "missing"), 10)).toBeUndefined();
         expect(fs.readHead(root, 10)).toBeUndefined();
     });
+
+    test("listDirectory lists entries and degrades to undefined", () => {
+        expect(fs.listDirectory(root)?.includes("sub")).toBe(true);
+        expect(fs.listDirectory(join(root, "sub"))).toEqual([]);
+        expect(fs.listDirectory(join(root, "file.txt"))).toBeUndefined();
+        expect(fs.listDirectory(join(root, "missing"))).toBeUndefined();
+    });
 });

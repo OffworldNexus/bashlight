@@ -14,6 +14,7 @@ import {
     pipSubcommand,
 } from "../knowledge/python-command-line.ts";
 import { resolveScript } from "../knowledge/script-resolver.ts";
+import { isVenvExecutable } from "../knowledge/venv.ts";
 import { isOption } from "../knowledge/words.ts";
 import type { CallArg, Replacement } from "../rule.ts";
 import type { CommandCall, Rule, RuleContext, Verdict } from "../rule.ts";
@@ -67,6 +68,9 @@ export class PipToManagerRule implements Rule {
 
     inspect(call: CommandCall, context: RuleContext): Verdict {
         if (context.cwd === undefined) {
+            return keep();
+        }
+        if (isVenvExecutable(call, context)) {
             return keep();
         }
         const project = context.project.python(context.cwd);
