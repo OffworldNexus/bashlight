@@ -26,9 +26,9 @@ export interface RuleHelpers {
     readonly isVenvActive: typeof isVenvActive;
 }
 
-/** The production helpers; the same object is passed to every factory. */
+/** The production helpers; the same frozen object is passed to every factory. */
 export function createRuleHelpers(): RuleHelpers {
-    return {
+    return Object.freeze({
         keep,
         block,
         replace,
@@ -39,5 +39,5 @@ export function createRuleHelpers(): RuleHelpers {
         parsePythonCommand,
         parseNodeCommand,
         isVenvActive,
-    };
+    });
 }

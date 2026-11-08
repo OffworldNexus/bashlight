@@ -2,9 +2,9 @@
  * `bashlight rules` — list the rules in effect, in priority order.
  *
  * It resolves the same catalog the plugin uses (project files, global files,
- * then the built-ins), so what it prints is what will run. Disabled rules and
- * files that failed to load are shown too, which is the quickest way to debug a
- * custom rule that never fires.
+ * then the built-ins), so what it prints is what will run. Disabled rules, load
+ * failures and untrusted project rules are shown too, which is the quickest way
+ * to debug a custom rule that never fires.
  */
 
 import type { CatalogReport, CatalogRule } from "../../rules/custom/index.ts";
@@ -13,6 +13,7 @@ import type { FlagSpec } from "../argv.ts";
 import { parseArgv } from "../argv.ts";
 import { type CliCommand, printCommandHelp, usageError } from "../command.ts";
 import type { CommandIo } from "../io.ts";
+import { refreshRules } from "../refresh-rules.ts";
 
 const SPEC: readonly FlagSpec[] = [{ name: "cwd", value: true }];
 
@@ -31,7 +32,7 @@ export class RulesCommand implements CliCommand {
             return 0;
         }
         const cwd = resolve(io.cwd, parsed.flags.value("cwd") ?? ".") ?? io.cwd;
-        await io.ruleAccess.prepare(cwd);
+        await refreshRules(io, cwd);
         for (const line of render(io.ruleAccess.report(cwd), cwd)) {
             io.output.line(line);
         }
@@ -43,7 +44,18 @@ export class RulesCommand implements CliCommand {
 export function render(report: CatalogReport, directory: string): readonly string[] {
     const active = report.rules.filter((rule) => !rule.disabled);
     const disabled = report.rules.filter((rule) => rule.disabled);
-    const lines: string[] = [`bashlight rules in ${directory}`, "", "Active:"];
+    const lines: string[] = [`bashlight rules in ${directory}`, ""];
+    if (!report.customRulesEnabled) {
+        lines.push("Custom rules are disabled (customRules: false).", "");
+    }
+    if (report.untrusted !== undefined) {
+        const { files, directory: project } = report.untrusted;
+        lines.push(
+            `${String(files)} project rule file(s) found but not trusted — run \`bashlight trust ${project}\``,
+            "",
+        );
+    }
+    lines.push("Active:");
     if (active.length === 0) {
         lines.push("  (none)");
     }

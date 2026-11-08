@@ -39,6 +39,7 @@ export function toCommandCall(invocation: Invocation): CommandCall {
             origin: classifyArg(arg),
         })),
         env: invocation.env,
+        ...(invocation.stdin === undefined ? {} : { stdin: invocation.stdin }),
     };
 }
 

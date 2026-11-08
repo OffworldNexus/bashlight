@@ -2,7 +2,14 @@
  * Outside any Python project, route Python invocations through `uv` (which
  * understands PEP 723 inline metadata) and refuse `pip install`, whose only
  * safe home is a project or a throwaway `uv run` environment.
+ *
+ * Because a bare `uv run python` gets an empty ephemeral environment, the rule
+ * also reads the code it is about to run — a `-c` snippet, a script file, a
+ * heredoc or herestring on stdin, or a `-m` module — and adds a `--with <dist>`
+ * for every third-party module it imports, so that probing a module and then
+ * using it both work.
  */
+import { dirname, join, resolve } from "../../shared/posix-path.ts";
 import {
     interpreterVersion,
     isPipCommand,
@@ -14,6 +21,12 @@ import {
     type PythonCommand,
     shebangPythonBase,
 } from "../knowledge/python-command-line.ts";
+import {
+    distributionFor,
+    hasPep723Block,
+    isStdlibModule,
+    PythonImportScanner,
+} from "../knowledge/python-imports.ts";
 import { resolveScript } from "../knowledge/script-resolver.ts";
 import { isOption } from "../knowledge/words.ts";
 import type { CommandCall, Rule, RuleContext, Verdict } from "../rule.ts";
@@ -27,9 +40,16 @@ export const PIP_OUTSIDE_PROJECT_MESSAGE =
 
 const UV_REASON = "run with uv";
 
+/** Past this many dependencies it is not a quick probe; keep the plain run. */
+const MAX_WITH = 10;
+
+/** Scripts are read up to this size when looking for imports. */
+const SCRIPT_MAX_BYTES = 256 * 1024;
+
 export class BarePythonRule implements Rule {
     readonly id = "bare-python";
     readonly scope = "local";
+    private readonly imports = new PythonImportScanner();
 
     inspect(call: CommandCall, context: RuleContext): Verdict {
         if (context.cwd === undefined) {
@@ -61,7 +81,7 @@ export class BarePythonRule implements Rule {
         if (!isPythonInterpreter(call.argv[python.toolIndex]?.value)) {
             return keep();
         }
-        return this.interpreter(call, python);
+        return this.interpreter(call, python, context);
     }
 
     /** A Python-shebang script runs under `uv` like `python script.py` does. */
@@ -88,22 +108,105 @@ export class BarePythonRule implements Rule {
         return block(PIP_OUTSIDE_PROJECT_MESSAGE);
     }
 
-    private interpreter(call: CommandCall, python: PythonCommand): Verdict {
+    private interpreter(
+        call: CommandCall,
+        python: PythonCommand,
+        context: RuleContext,
+    ): Verdict {
         const name = call.argv[python.toolIndex]?.value;
         if (name === undefined) {
             return keep();
         }
         const version = interpreterVersion(name);
-        const next = call.argv[python.toolIndex + 1]?.value;
-        const rest = argsFrom(call.argv, python.toolIndex + 1);
         const prefix = [...text("uv", "run")];
         if (version !== undefined) {
             prefix.push(...text("--python", version));
         }
+        for (const distribution of this.distributions(call, python, context)) {
+            prefix.push(...text("--with", distribution));
+        }
+        const next = call.argv[python.toolIndex + 1]?.value;
+        const rest = argsFrom(call.argv, python.toolIndex + 1);
         if (isScript(next)) {
             return replace([...prefix, ...rest], UV_REASON);
         }
         return replace([...prefix, ...text("python"), ...rest], UV_REASON);
+    }
+
+    /** The third-party distributions the code about to run will need. */
+    private distributions(
+        call: CommandCall,
+        python: PythonCommand,
+        context: RuleContext,
+    ): readonly string[] {
+        const next = call.argv[python.toolIndex + 1]?.value;
+        if (next === "-c") {
+            const code = call.argv[python.toolIndex + 2]?.value;
+            return code === undefined
+                ? []
+                : this.forModules(this.scan(code), context.cwd, context);
+        }
+        if (next === "-m") {
+            const module = topLevel(call.argv[python.toolIndex + 2]?.value);
+            return module === undefined
+                ? []
+                : this.forModules([module], context.cwd, context);
+        }
+        if (next === undefined || next === "-") {
+            const stdin = call.stdin;
+            return stdin === undefined
+                ? []
+                : this.forModules(this.scan(stdin), context.cwd, context);
+        }
+        if (isScript(next)) {
+            return this.forScript(next, context);
+        }
+        return [];
+    }
+
+    /** Top-level third-party modules imported by a script file on disk. */
+    private forScript(script: string, context: RuleContext): readonly string[] {
+        const path = resolve(context.cwd, script);
+        if (path === undefined) {
+            return [];
+        }
+        const text = context.files.readHead(path, SCRIPT_MAX_BYTES);
+        if (text === undefined || hasPep723Block(text)) {
+            return [];
+        }
+        return this.forModules(this.scan(text), dirname(path), context);
+    }
+
+    private scan(code: string): readonly string[] {
+        return this.imports.scan(code);
+    }
+
+    /**
+     * Distributions for these module names, skipping stdlib and local modules,
+     * mapping import names to their distributions, and giving up past the cap.
+     */
+    private forModules(
+        modules: readonly string[],
+        baseDir: string | undefined,
+        context: RuleContext,
+    ): readonly string[] {
+        const distributions: string[] = [];
+        const seen = new Set<string>();
+        for (const module of modules) {
+            if (isStdlibModule(module) || isLocalModule(module, baseDir, context)) {
+                continue;
+            }
+            const distribution = distributionFor(module);
+            if (distribution === undefined || seen.has(distribution)) {
+                continue;
+            }
+            seen.add(distribution);
+            distributions.push(distribution);
+            if (distributions.length > MAX_WITH) {
+                return [];
+            }
+        }
+        return distributions;
     }
 }
 
@@ -113,4 +216,25 @@ function isScript(value: string | undefined): boolean {
         return false;
     }
     return value.endsWith(".py") || value.endsWith(".pyw") || value.includes("/");
+}
+
+/** The top-level name of a possibly dotted module (`json.tool` → `json`). */
+function topLevel(name: string | undefined): string | undefined {
+    const top = name?.split(".")[0]?.trim();
+    return top === undefined || top === "" ? undefined : top;
+}
+
+/** Whether a local `<name>.py` or `<name>/` shadows a third-party import. */
+function isLocalModule(
+    module: string,
+    baseDir: string | undefined,
+    context: RuleContext,
+): boolean {
+    if (baseDir === undefined) {
+        return false;
+    }
+    return (
+        context.files.exists(join(baseDir, `${module}.py`)) ||
+        context.files.isDirectory(join(baseDir, module))
+    );
 }

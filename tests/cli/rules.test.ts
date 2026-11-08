@@ -2,12 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import { RulesCommand } from "../../src/cli/commands/rules.ts";
 import type { CatalogReport } from "../../src/rules/custom/index.ts";
-import type { Rule } from "../../src/rules/rule.ts";
+import { stubRule } from "../support/rules.ts";
 import { FakeRuleAccess, outputOf, testIo } from "./fakes.ts";
-
-function rule(id: string): Rule {
-    return { id, scope: "local", inspect: () => ({ kind: "keep" }) };
-}
 
 const REPORT: CatalogReport = {
     rules: [
@@ -16,13 +12,13 @@ const REPORT: CatalogReport = {
             source: "project",
             path: "/w/.opencode/bashlight/rules/make-test.ts",
             disabled: false,
-            rule: rule("make-test"),
+            rule: stubRule("make-test"),
         },
         {
             id: "node-manager",
             source: "builtin",
             disabled: true,
-            rule: rule("node-manager"),
+            rule: stubRule("node-manager"),
         },
     ],
     errors: [
@@ -31,6 +27,7 @@ const REPORT: CatalogReport = {
             message: "module has no default export",
         },
     ],
+    customRulesEnabled: true,
 };
 
 describe("rules", () => {
@@ -48,12 +45,48 @@ describe("rules", () => {
         expect(text).toContain("module has no default export");
     });
 
+    test("warns about untrusted project rule files", async () => {
+        const report: CatalogReport = {
+            rules: [],
+            errors: [],
+            customRulesEnabled: true,
+            untrusted: { directory: "/w", files: 3 },
+        };
+        const io = testIo({ cwd: "/w", ruleAccess: new FakeRuleAccess(report) });
+        await new RulesCommand().run(["--cwd", "/w"], io);
+        const text = outputOf(io).text();
+        expect(text).toContain("3 project rule file(s) found but not trusted");
+        expect(text).toContain("bashlight trust /w");
+    });
+
+    test("says when custom rules are disabled", async () => {
+        const report: CatalogReport = {
+            rules: [],
+            errors: [],
+            customRulesEnabled: false,
+        };
+        const io = testIo({ cwd: "/w", ruleAccess: new FakeRuleAccess(report) });
+        await new RulesCommand().run(["--cwd", "/w"], io);
+        expect(outputOf(io).text()).toContain("Custom rules are disabled");
+    });
+
     test("reports an empty active set", async () => {
         const io = testIo({
-            ruleAccess: new FakeRuleAccess({ rules: [], errors: [] }),
+            ruleAccess: new FakeRuleAccess({
+                rules: [],
+                errors: [],
+                customRulesEnabled: true,
+            }),
         });
         await new RulesCommand().run([], io);
         expect(outputOf(io).text()).toContain("(none)");
+    });
+
+    test("refreshes the given directory", async () => {
+        const access = new FakeRuleAccess();
+        const io = testIo({ cwd: "/w", ruleAccess: access });
+        await new RulesCommand().run(["--cwd", "/w"], io);
+        expect(access.refreshed).toEqual(["/w"]);
     });
 
     test("rejects an unknown option", async () => {

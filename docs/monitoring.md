@@ -123,6 +123,23 @@ Active:
    …
 ```
 
+## `bashlight trust` / `bashlight untrust`
+
+A project's [own rules](rules.md#your-own-rules) are code that runs with your full
+privileges, so they stay disabled until you allow them. `bashlight trust [DIR]`
+(default: the current directory) trusts a project and prints the rule files it enables;
+`bashlight untrust [DIR]` removes it again. Global rules are always trusted, and
+`customRules: false` disables all custom rules.
+
+```console
+$ bashlight trust ~/dev/shop
+trusted /home/user/dev/shop
+  enables /home/user/dev/shop/.opencode/bashlight/rules/make-test.ts
+```
+
+Until a project is trusted, `bashlight rules` and `bashlight doctor` report how many
+project rule files were found but skipped.
+
 ## `bashlight doctor`
 
 Diagnoses the whole installation: the runtime versions, whether the plugin is
@@ -147,6 +164,8 @@ $ bashlight doctor
 | `doctor` warns that the audit log is idle           | no shell call has gone through in the last day. Confirm the plugin is enabled, then run one command and check again                                                                                                                                    |
 | A rule changes something it should not              | list its id in [`disabledRules`](getting-started.md#options)                                                                                                                                                                                           |
 | A custom rule never fires                           | `bashlight rules` shows it (or the load error) and `bashlight explain` shows the rewrite; a rule file has no runtime import of bashlight, only the `helpers` it is handed                                                                              |
+| `rules`/`doctor` say project rules are not trusted  | a project's rule files run with your full privileges, so they are skipped until you allow them: `bashlight trust <dir>`. Global rules are always loaded; `customRules: false` turns them all off                                                       |
+| A custom rule disappeared after an edit             | the whole rules folder reloads on any change; check `bashlight rules` for a load error (a bad import, a thrown factory, or a file over the 2 s budget)                                                                                                 |
 | The audit log is huge                               | it is append-only by design: rotate or truncate it. `bashlight watch` and `stats` cope with a rotated file                                                                                                                                             |
 | You want to know what it would do before it does it | `bashlight explain '<command>' --cwd <dir>` — same code, no execution                                                                                                                                                                                  |
 

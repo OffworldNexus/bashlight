@@ -36,6 +36,14 @@ export interface CommandCall {
     readonly argv: readonly CallArg[];
     /** Variables visible to the command, prefix assignments included. */
     readonly env: EnvironmentView;
+    /**
+     * The command's statically known stdin text, when there is one: a quoted
+     * heredoc, or an unquoted heredoc/herestring whose expansion is fully
+     * known. Absent when stdin comes from a pipe, a file, or an expansion the
+     * interpreter cannot resolve. Rules use it to read code fed to an
+     * interpreter as a whole (`python - <<EOF`), never as a general input.
+     */
+    readonly stdin?: string;
 }
 
 export interface RuleContext {

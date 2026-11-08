@@ -9,12 +9,16 @@ import type { CommandProcessor } from "./outcome.ts";
 import type { FileSystem } from "./project/file-system.ts";
 import { createProjectInspector } from "./project/project-inspector.ts";
 import { createScriptInspector } from "./project/script-inspector.ts";
-import { CommandProcessorImpl } from "./rewrite/processor.ts";
+import { CommandProcessorImpl, type RuleEngineFactory } from "./rewrite/processor.ts";
 import { Rewriter } from "./rewrite/rewriter.ts";
 import { ShellQuoter } from "./rewrite/shell-quoter.ts";
 import { createBuiltinRules } from "./rules/builtin/index.ts";
 import type { Rule } from "./rules/rule.ts";
-import type { RuleErrorSink } from "./rules/rule-engine.ts";
+import {
+    NoopRuleErrorSink,
+    RuleEngine,
+    type RuleErrorSink,
+} from "./rules/rule-engine.ts";
 
 /**
  * The rules in effect for a project directory. The live plugin resolves custom
@@ -42,10 +46,14 @@ export function createBashlight(options: BashlightOptions): CommandProcessor {
     const provider: RuleProvider = options.rulesFor ?? (() => staticRules);
     const rulesFor: RuleProvider = (directory) =>
         provider(directory).filter((rule) => !disabled.has(rule.id));
+    const errorSink = options.ruleErrors ?? NOOP_ERROR_SINK;
+    const engineFactory: RuleEngineFactory = (rules) =>
+        new RuleEngine(rules, {}, errorSink);
     const quoter = new ShellQuoter();
     return new CommandProcessorImpl({
         interpreter,
         rulesFor,
+        engineFactory,
         rewriter: new Rewriter(quoter),
         quoter,
         inspectors: () => ({
@@ -53,6 +61,7 @@ export function createBashlight(options: BashlightOptions): CommandProcessor {
             scripts: createScriptInspector(options.fileSystem),
             files: options.fileSystem,
         }),
-        ...(options.ruleErrors === undefined ? {} : { ruleErrors: options.ruleErrors }),
     });
 }
+
+const NOOP_ERROR_SINK = new NoopRuleErrorSink();

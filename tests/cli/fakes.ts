@@ -10,8 +10,13 @@ import type { Output } from "../../src/cli/output.ts";
 import type { ProcessRunner, RunResult } from "../../src/cli/process-runner.ts";
 import type { Scheduler } from "../../src/cli/scheduler.ts";
 import { createBuiltinRules } from "../../src/rules/builtin/index.ts";
-import type { CatalogReport, RuleAccess } from "../../src/rules/custom/index.ts";
+import type {
+    CatalogReport,
+    MutableTrustStore,
+    RuleAccess,
+} from "../../src/rules/custom/index.ts";
 import type { Rule } from "../../src/rules/rule.ts";
+import { isInside } from "../../src/shared/posix-path.ts";
 
 /** An `Output` that keeps every line it was asked to write. */
 export class FakeOutput implements Output {
@@ -135,11 +140,19 @@ export class FakeCliFiles implements CliFiles {
     }
 }
 
+/** An empty catalog report with custom rules enabled. */
+function emptyReport(): CatalogReport {
+    return { rules: [], errors: [], customRulesEnabled: true };
+}
+
 /** A `RuleAccess` with the built-ins alone; tests override it when needed. */
 export class FakeRuleAccess implements RuleAccess {
-    constructor(private readonly snapshot: CatalogReport = { rules: [], errors: [] }) {}
+    readonly refreshed: string[] = [];
 
-    prepare(): Promise<void> {
+    constructor(private readonly snapshot: CatalogReport = emptyReport()) {}
+
+    refresh(directory: string): Promise<void> {
+        this.refreshed.push(directory);
         return Promise.resolve();
     }
 
@@ -149,6 +162,33 @@ export class FakeRuleAccess implements RuleAccess {
 
     report(): CatalogReport {
         return this.snapshot;
+    }
+}
+
+/** A mutable `TrustStore` over an in-memory set of trusted directories. */
+export class FakeTrust implements MutableTrustStore {
+    private readonly roots = new Set<string>();
+
+    constructor(initial: readonly string[] = []) {
+        for (const root of initial) {
+            this.roots.add(root);
+        }
+    }
+
+    isTrusted(directory: string): boolean {
+        return [...this.roots].some((root) => isInside(directory, root));
+    }
+
+    list(): readonly string[] {
+        return [...this.roots];
+    }
+
+    trust(directory: string): void {
+        this.roots.add(directory);
+    }
+
+    untrust(directory: string): void {
+        this.roots.delete(directory);
     }
 }
 
@@ -172,6 +212,7 @@ export function testIo(overrides: Partial<CommandIo> = {}): CommandIo {
                 ...(rules === undefined ? {} : { rules }),
             }),
         ruleAccess: overrides.ruleAccess ?? new FakeRuleAccess(),
+        trust: overrides.trust ?? new FakeTrust(),
         ...overrides,
     };
 }

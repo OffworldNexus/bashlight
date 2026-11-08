@@ -6,7 +6,7 @@
 
 import type { CommandProcessor } from "../outcome.ts";
 import type { FileSystem } from "../project/index.ts";
-import type { RuleAccess } from "../rules/custom/index.ts";
+import type { MutableTrustStore, RuleAccess } from "../rules/custom/index.ts";
 import type { Rule } from "../rules/rule.ts";
 import type { Clock } from "./clock.ts";
 import type { CliFiles } from "./files.ts";
@@ -42,4 +42,6 @@ export interface CommandIo {
     ) => CommandProcessor;
     /** The custom-rule catalog, shared by `explain`, `rules` and `doctor`. */
     readonly ruleAccess: RuleAccess;
+    /** The trust store behind `bashlight trust` / `bashlight untrust`. */
+    readonly trust: MutableTrustStore;
 }

@@ -15,6 +15,7 @@ import { parseArgv } from "../argv.ts";
 import { type CliCommand, printCommandHelp, usageError } from "../command.ts";
 import { COLORS, paint } from "../format.ts";
 import type { CommandIo } from "../io.ts";
+import { refreshRules } from "../refresh-rules.ts";
 
 const SPEC: readonly FlagSpec[] = [
     { name: "cwd", value: true },
@@ -47,7 +48,7 @@ export class ExplainCommand implements CliCommand {
         }
         const cwd = resolve(io.cwd, parsed.flags.value("cwd") ?? ".") ?? io.cwd;
         const colors = io.output.colors && !parsed.flags.bool("no-color");
-        await io.ruleAccess.prepare(cwd);
+        await refreshRules(io, cwd);
         const outcome = io
             .processorFactory(io.fileSystem, io.ruleAccess.rulesFor(cwd))
             .process({ command, cwd, env });

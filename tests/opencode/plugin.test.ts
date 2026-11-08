@@ -40,6 +40,13 @@ describe("readOptions", () => {
         ).toEqual(["a", "b"]);
         expect(readOptions({ disabledRules: "a" }, {}).disabledRules).toEqual([]);
     });
+
+    test("enables custom rules unless explicitly disabled", () => {
+        expect(readOptions({}, {}).customRules).toBe(true);
+        expect(readOptions({ customRules: true }, {}).customRules).toBe(true);
+        expect(readOptions({ customRules: false }, {}).customRules).toBe(false);
+        expect(readOptions({ customRules: "no" }, {}).customRules).toBe(true);
+    });
 });
 
 describe("setup", () => {

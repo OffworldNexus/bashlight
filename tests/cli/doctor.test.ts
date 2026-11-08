@@ -198,6 +198,7 @@ describe("doctor", () => {
                 errors: [
                     { path: "/w/.opencode/bashlight/rules/bad.ts", message: "boom" },
                 ],
+                customRulesEnabled: true,
             }),
         });
         const code = await new DoctorCommand().run(
@@ -208,5 +209,45 @@ describe("doctor", () => {
         expect(code).toBe(0);
         expect(text).toContain("⚠ custom rules");
         expect(text).toContain("/w/.opencode/bashlight/rules/bad.ts: boom");
+    });
+
+    test("warns about untrusted project rule files", async () => {
+        const io = doctorIo({
+            files: projectLayout({ "/w/audit.jsonl": auditLine() }),
+            runner: runner(true, true),
+            ruleAccess: new FakeRuleAccess({
+                rules: [],
+                errors: [],
+                customRulesEnabled: true,
+                untrusted: { directory: "/w", files: 2 },
+            }),
+        });
+        const code = await new DoctorCommand().run(
+            ["--project", "/w", "--log", "/w/audit.jsonl"],
+            io,
+        );
+        const text = outputOf(io).text();
+        expect(code).toBe(0);
+        expect(text).toContain("⚠ custom rules");
+        expect(text).toContain("2 project rule file(s) found but not trusted");
+        expect(text).toContain("bashlight trust /w");
+    });
+
+    test("reports custom rules as disabled", async () => {
+        const io = doctorIo({
+            files: projectLayout({ "/w/audit.jsonl": auditLine() }),
+            runner: runner(true, true),
+            ruleAccess: new FakeRuleAccess({
+                rules: [],
+                errors: [],
+                customRulesEnabled: false,
+            }),
+        });
+        const code = await new DoctorCommand().run(
+            ["--project", "/w", "--log", "/w/audit.jsonl"],
+            io,
+        );
+        expect(code).toBe(0);
+        expect(outputOf(io).text()).toContain("✓ custom rules (disabled)");
     });
 });

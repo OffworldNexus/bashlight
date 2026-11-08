@@ -102,6 +102,11 @@ $ pip install requests        # venv-only project
 Outside any Python project, Python has no environment to run in: `python` becomes
 `uv run python`, and installing with `pip` is the one command bashlight blocks.
 
+Because a bare `uv run python` gets an empty ephemeral environment, the rule reads the
+code it is about to run — a `-c` snippet, a script file, a heredoc/herestring on stdin,
+or a `-m` module — and adds `--with <dist>` for every **third-party** module it imports.
+So probing a module and then using it agree:
+
 ```bash
 $ python3 - <<'EOF'
 print(1)
@@ -110,15 +115,39 @@ EOF
 print(1)
 EOF
 
+$ python3 -c 'import cairosvg'
+→ uv run --with cairosvg python -c 'import cairosvg'
+
+$ python3 - <<'EOF'
+import requests
+print(requests.get("https://example.com"))
+EOF
+→ uv run --with requests python - <<'EOF'
+import requests
+print(requests.get("https://example.com"))
+EOF
+
+$ python -m black .
+→ uv run --with black python -m black .
+
+$ python probe.py          # probe.py imports cairosvg
+→ uv run --with cairosvg probe.py
+
 $ python main.py
 → uv run main.py
 
-$ python -c 'print(1)'
-→ uv run python -c 'print(1)'
+$ python -c 'import os, sys'   # stdlib only: no --with
+→ uv run python -c 'import os, sys'
 
 $ pip install requests
 → blocked
 ```
+
+Standard-library imports add nothing, local modules (`<name>.py` or `<name>/` next to
+the code) are not downloaded, well-known import/distribution mismatches are mapped
+(`PIL` → `pillow`, `cv2` → `opencv-python`, `yaml` → `pyyaml`, …), and past ten
+dependencies the plain run is kept. A script that already carries a PEP 723
+`# /// script` block is left to `uv` as-is.
 
 The block message points at the three ways to run a one-off dependency under `uv`: a PEP
 723 script, `uv run --with <pkg> python …`, or `uvx <tool>`.
@@ -172,13 +201,39 @@ $ npx npx vitest run
 
 ## Your own rules
 
+!!! warning "Rule files run with your full privileges"
+
+    A custom rule is code that runs inside the OpenCode process, with the same access to
+    your machine as bashlight itself. Global rules in your own config directory are
+    always trusted, but **a project's rule files are not loaded until you trust that
+    project** — a rule file committed to a repo you just cloned must not get to run code
+    (or shell out) the first time you use OpenCode there.
+
 You do not clone bashlight, install it, or write a plugin to add a rule. Drop a
 TypeScript (or JavaScript) file into a `rules` folder and it is picked up:
 
-| Where                                      | Applies to                         |
-| ------------------------------------------ | ---------------------------------- |
-| `<project>/.opencode/bashlight/rules/*.ts` | that project                       |
-| `~/.config/opencode/bashlight/rules/*.ts`  | every project (`$XDG_CONFIG_HOME`) |
+| Where                                      | Applies to                         | Trust                      |
+| ------------------------------------------ | ---------------------------------- | -------------------------- |
+| `<project>/.opencode/bashlight/rules/*.ts` | that project                       | `bashlight trust` required |
+| `~/.config/opencode/bashlight/rules/*.ts`  | every project (`$XDG_CONFIG_HOME`) | always trusted             |
+
+Project rules are resolved from the session's project directory. Until that directory is
+trusted, they are skipped: `bashlight rules` and `bashlight doctor` say how many were
+found but not trusted, and the plugin logs it once per project. The trust list is a JSON
+array of absolute directories in `~/.config/opencode/bashlight/trusted.json`; trusting a
+directory trusts everything under it.
+
+```console
+$ bashlight trust ~/dev/shop          # allow this project's rule files
+trusted /home/user/dev/shop
+  enables /home/user/dev/shop/.opencode/bashlight/rules/make-test.ts
+
+$ bashlight untrust ~/dev/shop        # stop loading them again
+untrusted /home/user/dev/shop
+```
+
+The whole project-rule system can be turned off at once with the
+[`customRules` option](getting-started.md#options).
 
 The file's **default export** is one of:
 
@@ -242,20 +297,28 @@ Active:
    …
 ```
 
-A file that fails to load, or a rule that throws, is skipped and logged (to stderr in
+A file that fails to load, throws, or takes too long is skipped and logged (to stderr in
 the plugin); it never breaks the shell call, and `doctor` reports it.
 
 ### Reload, precedence and overriding
 
-On the next command, bashlight re-scans both folders and reloads any file whose
-modification time changed — **edit a rule and it takes effect immediately, no OpenCode
-restart**.
+bashlight re-scans both folders on every command. When **any** file in a rules folder
+changes (its mtime or size, or a file appears or disappears), that whole folder reloads
+and its modules are evicted from the runtime cache — so a helper a rule imports from the
+same folder is reloaded too. **Edit a rule and it takes effect on the next command, no
+OpenCode restart.** Imports from outside the rules folder are not reloaded until
+OpenCode restarts.
 
 - Your rules run **before** the built-ins, and a custom rule with the same `id` as a
   built-in **replaces** it.
-- `disabledRules` removes any rule, built-in or custom.
-- Custom rules are resolved from the session's project directory; a project rule always
-  wins over a global one with the same `id`.
+- `disabledRules` removes any rule, built-in or custom; `customRules: false` removes
+  every custom rule.
+- A project rule always wins over a global one with the same `id`.
+
+The import and the factories run behind a **2-second budget**: a rule file that takes
+longer is reported as a load error. `inspect` itself must stay fast and synchronous (a
+rule that loops forever cannot be preempted), so keep the real work in the factories,
+not in `inspect`.
 
 ### Types (optional)
 

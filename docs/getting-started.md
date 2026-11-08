@@ -104,7 +104,8 @@ Options are the `{ package, options }` form of a `plugins` entry:
             "package": "github:OffworldNexus/bashlight",
             "options": {
                 "auditLog": false,
-                "disabledRules": ["node-manager"]
+                "disabledRules": ["node-manager"],
+                "customRules": false
             }
         }
     ]
@@ -115,9 +116,24 @@ Options are the `{ package, options }` form of a `plugins` entry:
 | --------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `auditLog`      | `$XDG_DATA_HOME/bashlight/audit.jsonl`, else `~/.local/share/bashlight/audit.jsonl` | A path to write the [audit log](monitoring.md#the-audit-log) to, or `false` to disable it. |
 | `disabledRules` | `[]`                                                                                | [Rule](rules.md) ids not to apply, built-in or custom, for example `["node-manager"]`.     |
+| `customRules`   | `true`                                                                              | `false` disables [your own rules](rules.md#your-own-rules) entirely (project and global).  |
 
 A malformed option is ignored rather than fatal: an unknown type falls back to the
 default, and an unknown rule id simply matches nothing.
+
+### Your own rules and trust
+
+Custom rules are optional and need no clone; see
+[Your own rules](rules.md#your-own-rules). A rule file is code that runs with your full
+privileges, so `~/.config/opencode/bashlight/rules/` is always loaded but a project's
+`.opencode/bashlight/rules/` is only loaded once you run:
+
+```console
+$ bashlight trust ~/dev/shop
+```
+
+`bashlight rules` and `bashlight doctor` tell you when project rules are being skipped,
+and `bashlight untrust ~/dev/shop` stops loading them again.
 
 ## Updating
 

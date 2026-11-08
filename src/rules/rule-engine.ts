@@ -113,7 +113,11 @@ export class RuleEngine {
                 return { kind: "keep" };
             }
             const outcome = this.inspect(
-                { argv, env: new OverlayEnvironment(call.env, injected) },
+                {
+                    argv,
+                    env: new OverlayEnvironment(call.env, injected),
+                    ...(call.stdin === undefined ? {} : { stdin: call.stdin }),
+                },
                 context,
             );
             if (outcome === undefined) {

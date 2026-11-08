@@ -12,6 +12,7 @@
  * names bashlight, and a missing file is simply not a match.
  */
 
+import { isRuleFileName } from "../rules/custom/index.ts";
 import { isRecord } from "../shared/guards.ts";
 import { join } from "../shared/posix-path.ts";
 import type { CliFiles } from "./files.ts";
@@ -25,7 +26,8 @@ export interface PluginDiscovery {
 /** The JSON to add to `opencode.json` when the plugin is missing. */
 export const INSTALL_SNIPPET = `"plugins": ["github:OffworldNexus/bashlight"]`;
 
-const PLUGIN_DIRECTORIES: readonly string[] = Object.freeze(["plugins"]);
+/** The folder OpenCode auto-discovers legacy plugin files in. */
+const PLUGIN_DIRECTORY = "plugins";
 
 /** Where the plugin's own entry point is re-exported from. */
 const PLUGIN_REFERENCE = "opencode/plugin";
@@ -61,18 +63,12 @@ export function discoverPlugin(
 
 /** A `.ts`/`.js` file in the `plugins` folder that re-exports the plugin. */
 function findLegacyPlugin(files: CliFiles, root: string): string | undefined {
-    for (const directory of PLUGIN_DIRECTORIES) {
-        const path = findPluginFile(files, join(root, directory));
-        if (path !== undefined) {
-            return path;
-        }
-    }
-    return undefined;
+    return findPluginFile(files, join(root, PLUGIN_DIRECTORY));
 }
 
 function findPluginFile(files: CliFiles, directory: string): string | undefined {
     for (const name of files.list(directory)) {
-        if (!name.endsWith(".ts") && !name.endsWith(".js")) {
+        if (!isRuleFileName(name)) {
             continue;
         }
         const path = join(directory, name);

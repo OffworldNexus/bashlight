@@ -10,15 +10,8 @@
 import { createBashlight } from "../bashlight.ts";
 import { configDirectory } from "../opencode/audit-log.ts";
 import { ConsoleLogger } from "../opencode/logger.ts";
-import { NodeRuleDirectoryReader } from "../opencode/rule-directory-reader.ts";
-import { FileRuleModuleImporter } from "../opencode/rule-module-importer.ts";
+import { createRuleCatalog, createTrustStore } from "../opencode/rule-catalog.ts";
 import type { FileSystem } from "../project/index.ts";
-import {
-    createRuleHelpers,
-    RuleCatalog,
-    RuleDirectories,
-    RuleModuleLoader,
-} from "../rules/custom/index.ts";
 import type { Rule } from "../rules/rule.ts";
 import { SystemClock } from "./clock.ts";
 import { CommandRegistry, printUsage } from "./command.ts";
@@ -27,6 +20,8 @@ import { ExplainCommand } from "./commands/explain.ts";
 import { HelpCommand } from "./commands/help.ts";
 import { RulesCommand } from "./commands/rules.ts";
 import { StatsCommand } from "./commands/stats.ts";
+import { TrustCommand } from "./commands/trust.ts";
+import { UntrustCommand } from "./commands/untrust.ts";
 import { WatchCommand } from "./commands/watch.ts";
 import { NodeCliFiles } from "./files.ts";
 import type { CommandIo } from "./io.ts";
@@ -42,25 +37,12 @@ export interface IoOptions {
     readonly colors?: boolean;
 }
 
-/** Builds the catalog the CLI resolves custom rules through. */
-function createRuleAccess(
-    env: Readonly<Record<string, string | undefined>>,
-): RuleCatalog {
-    return new RuleCatalog({
-        directories: new RuleDirectories(configDirectory(env)),
-        reader: new NodeRuleDirectoryReader(),
-        loader: new RuleModuleLoader({
-            importer: new FileRuleModuleImporter(),
-            helpers: createRuleHelpers(),
-        }),
-        reporter: new ConsoleLogger(),
-    });
-}
-
 /** Builds the production `CommandIo` from the process environment. */
 export function createIo(options: IoOptions): CommandIo {
     const env = options.env ?? process.env;
     const files = new NodeCliFiles();
+    const configDir = configDirectory(env);
+    const trust = createTrustStore(configDir);
     return {
         output: new ConsoleOutput(options.colors ?? defaultColors(env)),
         clock: new SystemClock(),
@@ -77,7 +59,12 @@ export function createIo(options: IoOptions): CommandIo {
                 fileSystem,
                 ...(rules === undefined ? {} : { rules }),
             }),
-        ruleAccess: createRuleAccess(env),
+        ruleAccess: createRuleCatalog({
+            configDir,
+            trust,
+            reporter: new ConsoleLogger(),
+        }),
+        trust,
     };
 }
 
@@ -88,6 +75,8 @@ export function createRegistry(): CommandRegistry {
         new StatsCommand(),
         new ExplainCommand(),
         new RulesCommand(),
+        new TrustCommand(),
+        new UntrustCommand(),
         new DoctorCommand(),
     ]);
     registry.addAll([new HelpCommand(() => registry.all())]);
@@ -128,10 +117,18 @@ export async function run(
             argv,
             createIo({ signal: controller.signal }),
         );
+    } catch (error) {
+        process.stderr.write(`bashlight: ${messageOf(error)}\n`);
+        return 1;
     } finally {
         process.off("SIGINT", stop);
         process.off("SIGTERM", stop);
     }
+}
+
+/** One line for an unexpected failure; never throws. */
+function messageOf(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 /** Colours only on a TTY, and never when `NO_COLOR` is set. */

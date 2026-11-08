@@ -84,3 +84,7 @@
 {"name":"command substitution as argv0","project":"poetry","cwd":"/home/user/dev/shop/api","command":"$(which python) main.py","expected":{"kind":"unchanged"}}
 {"name":"unterminated quote","project":"poetry","cwd":"/home/user/dev/shop/api","command":"python main.py '","expected":{"kind":"unchanged"}}
 {"name":"command -v substitution as argv0","project":"none","cwd":"/tmp/scratch","command":"$(command -v python3) main.py","expected":{"kind":"unchanged"}}
+{"name":"probe a module then use it (bare python)","project":"none","cwd":"/tmp/scratch","command":"python3 -c \"import cairosvg\" 2>/dev/null && echo cairosvg || echo \"no cairosvg\"","expected":{"kind":"rewritten","command":"uv run --with cairosvg python -c \"import cairosvg\" 2>/dev/null && echo cairosvg || echo \"no cairosvg\""}}
+{"name":"heredoc importing a third-party module","project":"none","cwd":"/tmp/scratch","command":"python3 - <<'EOF'\nimport cairosvg\nprint(1)\nEOF","expected":{"kind":"rewritten","command":"uv run --with cairosvg python - <<'EOF'\nimport cairosvg\nprint(1)\nEOF"}}
+{"name":"herestring importing a third-party module","project":"none","cwd":"/tmp/scratch","command":"python3 <<< \"import cairosvg\"","expected":{"kind":"rewritten","command":"uv run --with cairosvg python <<< \"import cairosvg\""}}
+{"name":"run a third-party module with -m","project":"none","cwd":"/tmp/scratch","command":"python3 -m black --check .","expected":{"kind":"rewritten","command":"uv run --with black python -m black --check ."}}

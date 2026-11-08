@@ -14,12 +14,7 @@ import type { FileSystem } from "../project/file-system.ts";
 import type { ProjectInspector } from "../project/project-inspector.ts";
 import type { ScriptInspector } from "../project/script-inspector.ts";
 import type { Rule, RuleContext } from "../rules/rule.ts";
-import {
-    type Decision,
-    NoopRuleErrorSink,
-    RuleEngine,
-    type RuleErrorSink,
-} from "../rules/rule-engine.ts";
+import type { Decision, RuleEngine } from "../rules/rule-engine.ts";
 import { isSubmitted, toCommandCall } from "./call-builder.ts";
 import { buildExpected } from "./expected.ts";
 import type { RewrittenTarget } from "./rewriter.ts";
@@ -34,19 +29,20 @@ export interface Inspectors {
     readonly files: FileSystem;
 }
 
+/** Builds the engine that applies one directory's rules (injected). */
+export type RuleEngineFactory = (rules: readonly Rule[]) => RuleEngine;
+
 export interface ProcessorDependencies {
     readonly interpreter: Interpreter;
     /** The rules in effect for one project directory (custom first). */
     readonly rulesFor: (directory: string) => readonly Rule[];
+    /** Builds the engine for a rule set; keeps the processor free of wiring. */
+    readonly engineFactory: RuleEngineFactory;
     readonly rewriter: Rewriter;
     /** Fresh inspectors for one request; they memoize per request. */
     readonly inspectors: () => Inspectors;
     readonly quoter: ShellQuoter;
-    /** Where rules report unexpected exceptions (fail-open). */
-    readonly ruleErrors?: RuleErrorSink;
 }
-
-const NOOP_ERROR_SINK = new NoopRuleErrorSink();
 
 export class CommandProcessorImpl implements CommandProcessor {
     constructor(private readonly dependencies: ProcessorDependencies) {}
@@ -79,7 +75,9 @@ export class CommandProcessorImpl implements CommandProcessor {
             return { kind: "unchanged", reason: "the command was too large" };
         }
         const inspectors = this.dependencies.inspectors();
-        const engine = this.engineFor(request.projectDir ?? request.cwd);
+        const engine = this.dependencies.engineFactory(
+            this.dependencies.rulesFor(request.projectDir ?? request.cwd),
+        );
         const decisions = new Map<Invocation, Decision>();
         const blockedMessages: string[] = [];
         const blockedRuleIds = new Set<string>();
@@ -144,15 +142,6 @@ export class CommandProcessorImpl implements CommandProcessor {
             command: plan.command,
             changes: plan.rewritten.map((target) => this.change(target)),
         };
-    }
-
-    /** Builds the engine for this directory's rules (cheap: an array holder). */
-    private engineFor(directory: string): RuleEngine {
-        return new RuleEngine(
-            this.dependencies.rulesFor(directory),
-            {},
-            this.dependencies.ruleErrors ?? NOOP_ERROR_SINK,
-        );
     }
 
     private change(target: RewrittenTarget): Change {

@@ -48,6 +48,12 @@ export interface Invocation {
     /** Every redirection of the command, expanded, for validation. */
     readonly redirects: readonly InvocationRedirect[];
     /**
+     * The command's statically known stdin text: a quoted heredoc, or an
+     * unquoted one (or herestring) whose expansion is fully known. `undefined`
+     * when stdin comes from a pipe, a file, or an expansion we cannot resolve.
+     */
+    readonly stdin: string | undefined;
+    /**
      * True when the invocation comes from a function body that is only visited
      * speculatively (a function that is never called).
      */

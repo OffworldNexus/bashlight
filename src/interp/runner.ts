@@ -47,6 +47,8 @@ interface ExpandedCommand {
     readonly assignments: readonly Binding[];
     readonly prefixNames: readonly string[];
     readonly redirects: readonly InvocationRedirect[];
+    /** The command's own stdin heredoc/herestring, when statically known. */
+    readonly stdin: string | undefined;
     readonly commandEnvScope: Scope;
     readonly baseScope: Scope;
 }
@@ -108,6 +110,7 @@ export class CommandRunner {
             assignments: prefixBindings,
             prefixNames: prefixBindings.map((binding) => binding.name),
             redirects: redirects.redirects,
+            stdin: ownStdin?.text,
             commandEnvScope,
             baseScope: scope,
         };
@@ -387,6 +390,7 @@ export class CommandRunner {
             env: context.env,
             context,
             redirects: expanded.redirects,
+            stdin: expanded.stdin,
             speculative: this.session.isSpeculative,
         };
         this.session.record(invocation, expanded.pending);
@@ -412,6 +416,7 @@ export class CommandRunner {
             env: context.env,
             context,
             redirects: expanded.redirects,
+            stdin: expanded.stdin,
             speculative: this.session.isSpeculative,
         };
         this.session.record(invocation, expanded.pending);

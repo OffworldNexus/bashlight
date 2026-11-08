@@ -14,18 +14,15 @@
  *     `$XDG_DATA_HOME/bashlight/audit.jsonl`, falling back to
  *     `~/.local/share/bashlight/audit.jsonl`.
  *   - `disabledRules`: rule ids the core should not apply.
+ *   - `customRules`: `false` drops every custom rule (project and global);
+ *     defaults to true. Project rules are only loaded once their directory is
+ *     trusted with `bashlight trust`.
  */
 
 import type { Plugin, PluginOptions } from "@opencode/plugin";
 
 import { createBashlight } from "../bashlight.ts";
 import { NodeFileSystem } from "../project/index.ts";
-import {
-    createRuleHelpers,
-    RuleCatalog,
-    RuleDirectories,
-    RuleModuleLoader,
-} from "../rules/custom/index.ts";
 import {
     type AuditLog,
     configDirectory,
@@ -35,8 +32,7 @@ import {
     NoopAuditLog,
 } from "./audit-log.ts";
 import { ConsoleLogger, type Logger, LoggingRuleErrorSink } from "./logger.ts";
-import { NodeRuleDirectoryReader } from "./rule-directory-reader.ts";
-import { FileRuleModuleImporter } from "./rule-module-importer.ts";
+import { createRuleCatalog } from "./rule-catalog.ts";
 import { SessionDirectoryCache } from "./session-directory-cache.ts";
 import { ShellInterceptor } from "./shell-interceptor.ts";
 
@@ -44,6 +40,7 @@ import { ShellInterceptor } from "./shell-interceptor.ts";
 export interface BashlightPluginOptions {
     readonly auditLog: string | false;
     readonly disabledRules: readonly string[];
+    readonly customRules: boolean;
 }
 
 function asString(value: unknown): string | undefined {
@@ -70,6 +67,7 @@ export function readOptions(
                 ? false
                 : (asString(options.auditLog) ?? defaultAuditLogPath(env)),
         disabledRules: asStringArray(options.disabledRules),
+        customRules: options.customRules !== false,
     };
 }
 
@@ -104,29 +102,16 @@ function createDirectoryResolver(
     return (sessionID) => cache.directoryFor(sessionID);
 }
 
-/** Builds the catalog that resolves custom rule files for a session. */
-function createRuleCatalog(
-    env: Environment,
-    options: BashlightPluginOptions,
-    logger: Logger,
-): RuleCatalog {
-    return new RuleCatalog({
-        directories: new RuleDirectories(configDirectory(env)),
-        reader: new NodeRuleDirectoryReader(),
-        loader: new RuleModuleLoader({
-            importer: new FileRuleModuleImporter(),
-            helpers: createRuleHelpers(),
-        }),
-        reporter: logger,
-        disabledRules: options.disabledRules,
-    });
-}
-
 /** Registers the shell interceptor and returns the plugin cleanup. */
 export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
     const options = readOptions(ctx.options, process.env);
     const logger = new ConsoleLogger();
-    const catalog = createRuleCatalog(process.env, options, logger);
+    const catalog = createRuleCatalog({
+        configDir: configDirectory(process.env),
+        reporter: logger,
+        disabledRules: options.disabledRules,
+        customRules: options.customRules,
+    });
     const interceptor = new ShellInterceptor({
         processor: createBashlight({
             fileSystem: new NodeFileSystem(),
@@ -137,7 +122,7 @@ export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
         logger,
         env: currentEnv,
         directoryFor: createDirectoryResolver(ctx, logger),
-        prepareRules: (directory) => catalog.prepare(directory),
+        refreshRules: (directory) => catalog.refresh(directory),
     });
 
     const registration = await ctx.tool.hook("execute.before", (event) =>

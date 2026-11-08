@@ -21,6 +21,7 @@ import { type CliCommand, printCommandHelp, usageError } from "../command.ts";
 import type { CliFiles } from "../files.ts";
 import type { CommandIo } from "../io.ts";
 import { discoverPlugin, INSTALL_SNIPPET } from "../plugin-discovery.ts";
+import { refreshRules } from "../refresh-rules.ts";
 
 const SPEC: readonly FlagSpec[] = [
     { name: "project", value: true },
@@ -59,7 +60,7 @@ export class DoctorCommand implements CliCommand {
         }
         const project = parsed.flags.value("project") ?? io.cwd;
         const log = parsed.flags.value("log") ?? defaultAuditLogPath(io.env);
-        await io.ruleAccess.prepare(project);
+        await refreshRules(io, project);
         const checks: Check[] = [
             checkBun(io),
             checkOpencode(io),
@@ -108,15 +109,24 @@ function checkPlugin(files: CliFiles, project: string, configDir: string): Check
     };
 }
 
-/** Reports rule files the catalog could not load (warn: fail-open). */
+/** Reports untrusted and unloadable custom rules (warn: fail-open). */
 function checkCustomRules(report: CatalogReport): Check {
-    if (report.errors.length === 0) {
+    if (!report.customRulesEnabled) {
+        return { severity: "pass", label: "custom rules (disabled)" };
+    }
+    const hints: string[] = [];
+    if (report.untrusted !== undefined) {
+        hints.push(
+            `${String(report.untrusted.files)} project rule file(s) found but not trusted — run \`bashlight trust ${report.untrusted.directory}\``,
+        );
+    }
+    for (const error of report.errors) {
+        hints.push(`${error.path}: ${error.message}`);
+    }
+    if (hints.length === 0) {
         return { severity: "pass", label: "custom rules" };
     }
-    const hint = report.errors
-        .map((error) => `${error.path}: ${error.message}`)
-        .join("; ");
-    return { severity: "warn", label: "custom rules", hint };
+    return { severity: "warn", label: "custom rules", hint: hints.join("; ") };
 }
 
 function checkAuditLog(io: CommandIo, path: string): readonly Check[] {

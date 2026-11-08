@@ -83,6 +83,7 @@ export class Harness {
     private cwd: string | undefined = "/w";
     private vars: Record<string, string> = {};
     private host: Host = LOCAL_HOST;
+    private stdinText: string | undefined;
     private injectedRules: readonly Rule[] | undefined;
     private rounds: number | undefined;
     private lastApplied: readonly AppliedRule[] = [];
@@ -104,6 +105,12 @@ export class Harness {
 
     env(vars: Readonly<Record<string, string>>): this {
         this.vars = { ...vars };
+        return this;
+    }
+
+    /** Statically known stdin text for the command. */
+    stdin(text: string): this {
+        this.stdinText = text;
         return this;
     }
 
@@ -149,6 +156,7 @@ export class Harness {
         const call: CommandCall = {
             argv,
             env: new MapEnvironment(this.vars),
+            ...(this.stdinText === undefined ? {} : { stdin: this.stdinText }),
         };
         const fs = new MemoryFileSystem(this.files);
         const context: RuleContext = {
