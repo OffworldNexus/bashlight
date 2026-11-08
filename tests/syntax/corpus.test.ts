@@ -1,7 +1,7 @@
 /**
  * Corpus test: parse every real command and assert the parse success rate and
  * the span round-trip invariants. Skipped with a clear message when the private
- * corpus submodule is absent (see `tests/support/corpus.ts`).
+ * corpus checkout is absent (see `tests/support/corpus.ts`).
  */
 
 import { expect, test } from "bun:test";

@@ -6,7 +6,7 @@
  * Asserts zero crashes, that every rewrite re-parses, and that the validator
  * never rejects a plan (a validation failure would reveal a rewriter bug).
  * Regenerates `corpus/expected-rewrites.jsonl` with `BASHLIGHT_UPDATE_GOLDEN=1`
- * and otherwise diffs against it. Skipped when the private corpus submodule is
+ * and otherwise diffs against it. Skipped when the private corpus checkout is
  * absent (see `tests/support/corpus.ts`).
  */
 

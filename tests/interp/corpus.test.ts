@@ -4,7 +4,7 @@
  * Interpret every command of the private corpus with the cwd it ran in. Asserts
  * zero exceptions and no truncation (except on a short list of pathological
  * inputs), and prints the interpreter's coverage stats. Skipped when the corpus
- * submodule is absent (see `tests/support/corpus.ts`).
+ * checkout is absent (see `tests/support/corpus.ts`).
  */
 
 import { expect, test } from "bun:test";

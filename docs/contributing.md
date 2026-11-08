@@ -28,13 +28,16 @@ Individually: `bunx prettier --write .`, `bunx eslint .`, `bunx tsc --noEmit`,
 `docs/` is built with `uvx zensical build --strict`.
 
 Unit tests live under `tests/<module>/`; `tests/cases/` holds hand-written end-to-end
-examples. `corpus/` is a private git submodule of anonymized real commands:
+examples. `corpus/` is an optional, git-ignored checkout of a private repository of
+anonymized real commands (maintainers only):
 
 ```console
-$ git submodule update --init corpus
+$ git clone https://github.com/OffworldNexus/bashlight-corpus.git corpus
 ```
 
-The corpus tests are skipped when the submodule is absent, so `bun test` works on a bare
+It is deliberately not a submodule: npm clones git dependencies with
+`--recurse-submodules`, so a private submodule would break installing bashlight from
+GitHub. The corpus tests are skipped when it is absent, so `bun test` works on a bare
 clone (as on CI). Refresh the reviewed golden file with
 `BASHLIGHT_UPDATE_GOLDEN=1 bun test`.
 

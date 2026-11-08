@@ -99,7 +99,7 @@ $ bun test     # the test suite
 This repo enables the working tree for itself through the one-line
 `.opencode/plugins/bashlight.ts` re-export — a contributor convenience, not the install
 story. `tests/cases/` holds hand-written end-to-end examples; `corpus/` is an optional,
-private git submodule of anonymized real commands and its tests are skipped when it is
+private checkout of anonymized real commands and its tests are skipped when it is
 absent, so `bun test` works on a bare clone. See
 [docs/contributing.md](docs/contributing.md) for the release checklist.
 

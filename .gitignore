@@ -9,3 +9,4 @@ corpus/raw/
 bench/runs/
 bench/.cache/
 .cache/
+corpus/

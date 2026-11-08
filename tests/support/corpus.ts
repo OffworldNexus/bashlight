@@ -2,10 +2,12 @@
  * One place that knows where the private command corpus lives and whether it is
  * usable.
  *
- * The corpus is the `bashlight-corpus` git submodule mounted at `corpus/`; it
- * is not checked out on CI, and its contents are anonymized best-effort only,
+ * The corpus is a private `bashlight-corpus` checkout at `corpus/` (git-ignored,
+ * deliberately not a submodule: npm clones git dependencies with
+ * `--recurse-submodules`, so a private submodule would break every install from
+ * GitHub). It is absent on CI, and its contents are anonymized best-effort only,
  * so nothing from it may be copied into this repository. Corpus tests therefore
- * must degrade to a single, clearly labelled skip when the submodule is absent
+ * must degrade to a single, clearly labelled skip when the checkout is absent
  * (`describeCorpus`), and must never read the files at import time: every loader
  * here is called lazily from inside a test.
  *
@@ -21,13 +23,13 @@ import { describe, expect, test } from "bun:test";
 
 import { isRecord } from "../../src/shared/guards.ts";
 
-/** The default corpus location: the submodule at the repository root. */
+/** The default corpus location: `corpus/` at the repository root. */
 const DEFAULT_CORPUS_DIR = fileURLToPath(new URL("../../corpus", import.meta.url));
 
-/** Shown when the private submodule is simply not checked out. */
+/** Shown when the private corpus is simply not checked out. */
 export const CORPUS_MISSING_MESSAGE =
-    "corpus submodule not checked out — run " +
-    "`git submodule update --init corpus` (private)";
+    "corpus not checked out — run " +
+    "`git clone https://github.com/OffworldNexus/bashlight-corpus.git corpus` (private)";
 
 /** The env var that turns every corpus test into a skip. */
 export const CORPUS_SKIP_ENV = "BASHLIGHT_SKIP_CORPUS";
