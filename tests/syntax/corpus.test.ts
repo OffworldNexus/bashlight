@@ -1,65 +1,21 @@
-// loadCorpus returns undefined when the corpus has not been generated.
-/* eslint-disable sonarjs/function-return-type */
 /**
  * Corpus test: parse every real command and assert the parse success rate and
- * the span round-trip invariants. Skipped with a clear message when the corpus
- * has not been generated yet (it is produced by another agent).
+ * the span round-trip invariants. Skipped with a clear message when the private
+ * corpus submodule is absent (see `tests/support/corpus.ts`).
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import { Parser } from "../../src/syntax/parser.ts";
 import { createSourceDocument } from "../../src/syntax/source.ts";
+import { describeCorpus, loadCorpusCommands } from "../support/corpus.ts";
 import { checkSpans } from "./helpers.ts";
 
-const CORPUS_PATH = fileURLToPath(
-    new URL("../../corpus/commands.jsonl", import.meta.url),
-);
 const MIN_SUCCESS_RATE = 0.99;
 
-interface CorpusRecord {
-    readonly id: string;
-    readonly command: string;
-}
-
-function loadCorpus(): CorpusRecord[] | undefined {
-    if (!existsSync(CORPUS_PATH)) {
-        return undefined;
-    }
-    const records: CorpusRecord[] = [];
-    for (const line of readFileSync(CORPUS_PATH, "utf8").split("\n")) {
-        if (line.trim().length === 0) {
-            continue;
-        }
-        try {
-            const parsed = JSON.parse(line) as { id?: unknown; command?: unknown };
-            if (typeof parsed.command === "string") {
-                records.push({
-                    id: typeof parsed.id === "string" ? parsed.id : "?",
-                    command: parsed.command,
-                });
-            }
-        } catch {
-            // ignore malformed lines
-        }
-    }
-    return records;
-}
-
-const corpus = loadCorpus();
-
-describe("corpus", () => {
-    if (corpus === undefined) {
-        test.skip("corpus/commands.jsonl is not available yet", () => {
-            expect(corpus).toBeUndefined();
-        });
-        return;
-    }
-
+describeCorpus("corpus", () => {
     test("parses almost every command with exact spans", () => {
+        const corpus = loadCorpusCommands();
         const parser = new Parser();
         let ok = 0;
         let spanViolations = 0;

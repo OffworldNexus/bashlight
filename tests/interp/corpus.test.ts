@@ -1,73 +1,25 @@
 // The corpus test is a broad, data-driven check.
-/* eslint-disable sonarjs/cognitive-complexity, sonarjs/function-return-type */
+/* eslint-disable sonarjs/cognitive-complexity */
 /**
- * Interpret every command of `corpus/commands.jsonl` with the cwd it ran in.
- * Asserts zero exceptions and no truncation (except on a short list of
- * pathological inputs), and prints the interpreter's coverage stats.
+ * Interpret every command of the private corpus with the cwd it ran in. Asserts
+ * zero exceptions and no truncation (except on a short list of pathological
+ * inputs), and prints the interpreter's coverage stats. Skipped when the corpus
+ * submodule is absent (see `tests/support/corpus.ts`).
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import { createInterpreter } from "../../src/interp/index.ts";
-
-const CORPUS_PATH = fileURLToPath(
-    new URL("../../corpus/commands.jsonl", import.meta.url),
-);
-
-interface CorpusRecord {
-    readonly id: string;
-    readonly command: string;
-    readonly cwd: string | undefined;
-}
-
-function loadCorpus(): CorpusRecord[] | undefined {
-    if (!existsSync(CORPUS_PATH)) {
-        return undefined;
-    }
-    const records: CorpusRecord[] = [];
-    for (const line of readFileSync(CORPUS_PATH, "utf8").split("\n")) {
-        if (line.trim().length === 0) {
-            continue;
-        }
-        try {
-            const parsed = JSON.parse(line) as {
-                id?: unknown;
-                command?: unknown;
-                cwd?: unknown;
-            };
-            if (typeof parsed.command === "string") {
-                records.push({
-                    id: typeof parsed.id === "string" ? parsed.id : "?",
-                    command: parsed.command,
-                    cwd: typeof parsed.cwd === "string" ? parsed.cwd : undefined,
-                });
-            }
-        } catch {
-            // ignore malformed lines
-        }
-    }
-    return records;
-}
-
-const corpus = loadCorpus();
+import { describeCorpus, loadCorpusCommands } from "../support/corpus.ts";
 
 const INITIAL = {
     variables: { HOME: "/home/user", PATH: "/usr/bin:/bin" },
     complete: true,
 };
 
-describe("interp corpus", () => {
-    if (corpus === undefined) {
-        test.skip("corpus/commands.jsonl is not available yet", () => {
-            expect(corpus).toBeUndefined();
-        });
-        return;
-    }
-
+describeCorpus("interp corpus", () => {
     test("interprets every command without throwing", () => {
+        const corpus = loadCorpusCommands();
         const interpreter = createInterpreter();
         let commands = 0;
         let invocations = 0;

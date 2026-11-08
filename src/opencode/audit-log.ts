@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/function-return-type */
 /**
  * The audit trail of every shell call bashlight looked at.
  *
@@ -7,10 +8,15 @@
  */
 
 import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 
 import type { Outcome } from "../outcome.ts";
-import { dirname } from "../shared/posix-path.ts";
+import { isRecord } from "../shared/guards.ts";
+import { dirname, join } from "../shared/posix-path.ts";
 import type { Logger } from "./logger.ts";
+
+/** The environment the path helpers may read (injectable for tests). */
+export type Environment = Readonly<Record<string, string | undefined>>;
 
 /** Injected time source so audit lines are deterministic in tests. */
 export interface Clock {
@@ -78,5 +84,118 @@ export class JsonlAuditLog implements AuditLog {
                 error,
             );
         }
+    }
+}
+
+/**
+ * The home directory from the injected environment, falling back to the OS.
+ * Shared by the plugin and the CLI so both resolve the same default paths.
+ */
+export function homeDirectory(env: Environment): string {
+    const home = env.HOME;
+    return home !== undefined && home !== "" ? home : homedir();
+}
+
+/** Resolves `$XDG_DATA_HOME/bashlight/audit.jsonl` or the `~/.local/share` one. */
+export function defaultAuditLogPath(env: Environment): string {
+    const dataHome = env.XDG_DATA_HOME;
+    const base =
+        dataHome !== undefined && dataHome.startsWith("/")
+            ? dataHome
+            : join(homeDirectory(env), ".local", "share");
+    return join(base, "bashlight", "audit.jsonl");
+}
+
+/** An audit entry as written on disk: the recorded fields plus its timestamp. */
+export interface TimedAuditEntry extends AuditEntry {
+    /** ISO 8601 timestamp added by {@link JsonlAuditLog}. */
+    readonly time: string;
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+    return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isOutcomeKind(value: unknown): value is Outcome["kind"] {
+    return value === "rewritten" || value === "blocked" || value === "unchanged";
+}
+
+function optionalString(value: unknown): string | undefined {
+    return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * The validated entry without its optional fields, or `undefined` when a
+ * required field is missing or ill-typed.
+ */
+function requiredFields(
+    value: Readonly<Record<string, unknown>>,
+): Omit<TimedAuditEntry, "command" | "message"> | undefined {
+    const { time, sessionID, callID, cwd, original, outcome, ruleIds, reasons } = value;
+    if (typeof time !== "string" || Number.isNaN(Date.parse(time))) {
+        return undefined;
+    }
+    if (
+        typeof sessionID !== "string" ||
+        typeof callID !== "string" ||
+        typeof cwd !== "string" ||
+        typeof original !== "string"
+    ) {
+        return undefined;
+    }
+    if (!isOutcomeKind(outcome) || !isStringArray(ruleIds) || !isStringArray(reasons)) {
+        return undefined;
+    }
+    return { time, sessionID, callID, cwd, original, outcome, ruleIds, reasons };
+}
+
+/** Validates one parsed JSON value into an entry, or `undefined`. */
+function parseEntry(value: unknown): TimedAuditEntry | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    const required = requiredFields(value);
+    if (required === undefined) {
+        return undefined;
+    }
+    const command = optionalString(value.command);
+    const message = optionalString(value.message);
+    return {
+        ...required,
+        ...(command === undefined ? {} : { command }),
+        ...(message === undefined ? {} : { message }),
+    };
+}
+
+/**
+ * Reads the JSONL audit log: the counterpart of {@link JsonlAuditLog}, living
+ * next to it so the format has one owner. Malformed lines (a partial append, a
+ * hand-edited file) are skipped rather than throwing, so a follower can safely
+ * re-parse a file it is concurrently reading.
+ */
+export class AuditLogReader {
+    /** Parses every line of a JSONL document, skipping blank/malformed ones. */
+    parse(text: string): readonly TimedAuditEntry[] {
+        const entries: TimedAuditEntry[] = [];
+        for (const line of text.split("\n")) {
+            const entry = parseEntry(parseJson(line));
+            if (entry !== undefined) {
+                entries.push(entry);
+            }
+        }
+        return entries;
+    }
+}
+
+/** `JSON.parse` of a trimmed line, or `undefined` when it is not valid JSON. */
+function parseJson(line: string): unknown {
+    const trimmed = line.trim();
+    if (trimmed === "") {
+        return undefined;
+    }
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        return undefined;
     }
 }

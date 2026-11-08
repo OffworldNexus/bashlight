@@ -43,10 +43,12 @@ dependencies = ["fastapi"]
 dev-dependencies = ["pytest"]
 `,
         [`${root}/uv.lock`]: "",
+        [`${root}/manage.py`]: "#!/usr/bin/env python3\nprint(1)\n",
+        [`${root}/scripts/report.py`]: "#!/usr/bin/python3\nprint(1)\n",
     };
 }
 
-/** Plain virtualenv project declaring flask. */
+/** Plain virtualenv project declaring flask, plus a Python-shebang script. */
 export function venvProject(root = "/w"): Fixtures {
     return {
         [`${root}/pyproject.toml`]: `[project]
@@ -55,6 +57,7 @@ version = "0.1.0"
 dependencies = ["flask"]
 `,
         [`${root}/.venv/bin/python`]: "",
+        [`${root}/app.py`]: "#!/usr/bin/env python3\nprint(1)\n",
     };
 }
 
@@ -67,6 +70,56 @@ export function pnpmProject(root = "/w"): Fixtures {
         }),
         [`${root}/pnpm-lock.yaml`]: "",
     };
+}
+
+/** npm project declaring vitest. */
+export function npmProject(root = "/w"): Fixtures {
+    return {
+        [`${root}/package.json`]: JSON.stringify({
+            name: "web",
+            devDependencies: { vitest: "^1.0.0" },
+        }),
+        [`${root}/package-lock.json`]: "",
+    };
+}
+
+/** Yarn (classic) project declaring eslint. */
+export function yarnProject(root = "/w"): Fixtures {
+    return {
+        [`${root}/package.json`]: JSON.stringify({
+            name: "web",
+            devDependencies: { eslint: "^9.0.0" },
+        }),
+        [`${root}/yarn.lock`]: "",
+    };
+}
+
+/** Bun project declaring vitest. */
+export function bunProject(root = "/w"): Fixtures {
+    return {
+        [`${root}/package.json`]: JSON.stringify({
+            name: "web",
+            devDependencies: { vitest: "^1.0.0" },
+        }),
+        [`${root}/bun.lock`]: "",
+    };
+}
+
+/** pnpm project declaring tsx and vitest, plus a tsx-shebang script. */
+export function tsxProject(root = "/w"): Fixtures {
+    return {
+        [`${root}/package.json`]: JSON.stringify({
+            name: "web",
+            devDependencies: { tsx: "^4.0.0", vitest: "^1.0.0" },
+        }),
+        [`${root}/pnpm-lock.yaml`]: "",
+        [`${root}/bin/cli`]: "#!/usr/bin/env tsx\nconsole.log(1)\n",
+    };
+}
+
+/** No project markers at all: a plain directory. */
+export function noProject(): Fixtures {
+    return {};
 }
 
 export interface RunOptions {

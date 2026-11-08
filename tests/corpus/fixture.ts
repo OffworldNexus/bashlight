@@ -6,22 +6,18 @@
  *
  * The dependency lists are a plausible, fixed set rather than the real ones —
  * the corpus records which project a command ran in, not its manifests.
+ *
+ * The corpus is optional and private: `corpusPath` locates it, and callers
+ * only touch these builders from inside a `describeCorpus` body.
  */
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import {
     type FileSystemEntries,
     MemoryFileSystem,
 } from "../../src/project/memory-file-system.ts";
-
-const PROJECTS_PATH = fileURLToPath(
-    new URL("../../corpus/projects.json", import.meta.url),
-);
-const COMMANDS_PATH = fileURLToPath(
-    new URL("../../corpus/commands.jsonl", import.meta.url),
-);
+import { corpusPath } from "../support/corpus.ts";
 
 const PYTHON_PACKAGES = ["pytest", "mypy", "ruff", "black", "django", "alembic"];
 const NODE_PACKAGES = ["vitest", "typescript", "tsx", "eslint", "prettier"];
@@ -69,38 +65,9 @@ interface ProjectRecord {
 }
 
 export function loadProjects(): Record<string, ProjectRecord> {
-    return JSON.parse(readFileSync(PROJECTS_PATH, "utf8")) as Record<
-        string,
-        ProjectRecord
-    >;
-}
-
-export interface CorpusCommand {
-    readonly id: string;
-    readonly command: string;
-    readonly cwd: string;
-}
-
-export function loadCommands(): CorpusCommand[] {
-    const commands: CorpusCommand[] = [];
-    for (const line of readFileSync(COMMANDS_PATH, "utf8").split("\n")) {
-        if (line.trim() === "") {
-            continue;
-        }
-        const parsed = JSON.parse(line) as {
-            id?: unknown;
-            command?: unknown;
-            cwd?: unknown;
-        };
-        if (typeof parsed.command === "string") {
-            commands.push({
-                id: typeof parsed.id === "string" ? parsed.id : "?",
-                command: parsed.command,
-                cwd: typeof parsed.cwd === "string" ? parsed.cwd : "/",
-            });
-        }
-    }
-    return commands;
+    return JSON.parse(
+        readFileSync(corpusPath("projects.json"), "utf8"),
+    ) as Record<string, ProjectRecord>;
 }
 
 export class CorpusFixture {

@@ -6,21 +6,18 @@
  * Asserts zero crashes, that every rewrite re-parses, and that the validator
  * never rejects a plan (a validation failure would reveal a rewriter bug).
  * Regenerates `corpus/expected-rewrites.jsonl` with `BASHLIGHT_UPDATE_GOLDEN=1`
- * and otherwise diffs against it.
+ * and otherwise diffs against it. Skipped when the private corpus submodule is
+ * absent (see `tests/support/corpus.ts`).
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import { createBashlight } from "../../src/bashlight.ts";
 import { createSourceDocument, Parser } from "../../src/syntax/index.ts";
-import { CorpusFixture, loadCommands } from "./fixture.ts";
-
-const GOLDEN_PATH = fileURLToPath(
-    new URL("../../corpus/expected-rewrites.jsonl", import.meta.url),
-);
+import { corpusPath, describeCorpus, loadCorpusCommands } from "../support/corpus.ts";
+import { CorpusFixture } from "./fixture.ts";
 
 const ENV = { HOME: "/home/user", PATH: "/usr/bin:/bin" };
 
@@ -46,8 +43,10 @@ interface CorpusRun {
 }
 
 function runCorpus(): CorpusRun {
-    const commands = loadCommands();
-    const processor = createBashlight({ fileSystem: new CorpusFixture().fileSystem() });
+    const commands = loadCorpusCommands();
+    const processor = createBashlight({
+        fileSystem: new CorpusFixture().fileSystem(),
+    });
     const parser = new Parser();
     const records: GoldenRecord[] = [];
     const thrown: { id: string; message: string }[] = [];
@@ -125,45 +124,55 @@ function runCorpus(): CorpusRun {
     };
 }
 
-const run = runCorpus();
+describeCorpus("corpus rewrite", () => {
+    // Memoized per file: the corpus is read on the first test, never at import.
+    let run: CorpusRun | undefined;
+    const corpusRun = (): CorpusRun => (run ??= runCorpus());
 
-describe("corpus rewrite", () => {
     test("never crashes and keeps every rewrite valid", () => {
+        const result = corpusRun();
         console.log(
-            `corpus rewrite: ${run.commands} commands, ${run.rewritten} rewritten, ` +
-                `${run.blocked} blocked`,
+            `corpus rewrite: ${result.commands} commands, ${result.rewritten} ` +
+                `rewritten, ${result.blocked} blocked`,
         );
         console.log(
-            `  rules: ${JSON.stringify([...run.ruleCounts].sort((a, b) => b[1] - a[1]))}`,
+            `  rules: ${JSON.stringify(
+                [...result.ruleCounts].sort((a, b) => b[1] - a[1]),
+            )}`,
         );
         console.log(
-            `  validation failures: ${run.validationFailures}, internal errors: ` +
-                `${run.internalErrors}, unparseable rewrites: ${run.unparseableRewrites.length}`,
+            `  validation failures: ${result.validationFailures}, internal errors: ` +
+                `${result.internalErrors}, unparseable rewrites: ` +
+                `${result.unparseableRewrites.length}`,
         );
         console.log(
             `  give-up reasons: ${JSON.stringify(
-                [...run.giveUpReasons].sort((a, b) => b[1] - a[1]).slice(0, 20),
+                [...result.giveUpReasons]
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 20),
             )}`,
         );
-        for (const failure of run.thrown.slice(0, 20)) {
+        for (const failure of result.thrown.slice(0, 20)) {
             console.log(`  THREW ${failure.id}: ${failure.message}`);
         }
-        expect(run.thrown).toEqual([]);
-        expect(run.unparseableRewrites).toEqual([]);
-        expect(run.validationFailures).toBe(0);
-        expect(run.internalErrors).toBe(0);
+        expect(result.thrown).toEqual([]);
+        expect(result.unparseableRewrites).toEqual([]);
+        expect(result.validationFailures).toBe(0);
+        expect(result.internalErrors).toBe(0);
     }, 120_000);
 
     test("matches the golden rewrite file", () => {
-        expect(run.records.length).toBeGreaterThan(0);
+        const result = corpusRun();
+        expect(result.records.length).toBeGreaterThan(0);
+        const goldenPath = corpusPath("expected-rewrites.jsonl");
         const serialized =
-            run.records.map((record) => JSON.stringify(record)).join("\n") + "\n";
+            result.records.map((record) => JSON.stringify(record)).join("\n") + "\n";
         const update = process.env["BASHLIGHT_UPDATE_GOLDEN"] === "1";
-        if (update || !existsSync(GOLDEN_PATH)) {
-            writeFileSync(GOLDEN_PATH, serialized);
+        if (update || !existsSync(goldenPath)) {
+            writeFileSync(goldenPath, serialized);
             return;
         }
-        const golden = readFileSync(GOLDEN_PATH, "utf8");
+        const golden = readFileSync(goldenPath, "utf8");
         if (golden === serialized) {
             return;
         }

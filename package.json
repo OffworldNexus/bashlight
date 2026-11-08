@@ -9,7 +9,11 @@
         ".": "./src/index.ts",
         "./opencode": "./src/opencode/plugin.ts"
     },
+    "bin": {
+        "bashlight": "bin/bashlight"
+    },
     "scripts": {
+        "cli": "bun bin/bashlight",
         "test": "bun test",
         "typecheck": "tsc --noEmit",
         "lint": "prettier --check . && eslint .",

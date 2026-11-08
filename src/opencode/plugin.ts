@@ -12,20 +12,20 @@
  *   - `disabledRules`: rule ids the core should not apply.
  */
 
-import { homedir } from "node:os";
-import { join } from "node:path";
-
 import { Plugin, type PluginOptions } from "@opencode/plugin";
 
 import { createBashlight } from "../bashlight.ts";
 import { NodeFileSystem } from "../project/index.ts";
-import { type AuditLog, JsonlAuditLog, NoopAuditLog } from "./audit-log.ts";
+import {
+    type AuditLog,
+    defaultAuditLogPath,
+    type Environment,
+    JsonlAuditLog,
+    NoopAuditLog,
+} from "./audit-log.ts";
 import { ConsoleLogger, type Logger } from "./logger.ts";
 import { SessionDirectoryCache } from "./session-directory-cache.ts";
 import { ShellInterceptor } from "./shell-interceptor.ts";
-
-/** The environment the composition root may read (kept injectable for tests). */
-type Environment = Readonly<Record<string, string | undefined>>;
 
 /** Resolved plugin options. */
 export interface BashlightPluginOptions {
@@ -44,22 +44,6 @@ function asStringArray(value: unknown): readonly string[] {
     return value.filter(
         (item): item is string => typeof item === "string" && item !== "",
     );
-}
-
-/** The home directory from the injected environment, falling back to the OS. */
-function homeDirectory(env: Environment): string {
-    const home = env.HOME;
-    return home !== undefined && home !== "" ? home : homedir();
-}
-
-/** Resolves `$XDG_DATA_HOME/bashlight/audit.jsonl` or the `~/.local/share` one. */
-function defaultAuditLogPath(env: Environment): string {
-    const dataHome = env.XDG_DATA_HOME;
-    const base =
-        dataHome !== undefined && dataHome.startsWith("/")
-            ? dataHome
-            : join(homeDirectory(env), ".local", "share");
-    return join(base, "bashlight", "audit.jsonl");
 }
 
 /** Reads the plugin options, ignoring anything malformed. */
