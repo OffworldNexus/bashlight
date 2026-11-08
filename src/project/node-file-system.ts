@@ -1,4 +1,11 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import {
+    closeSync,
+    existsSync,
+    openSync,
+    readFileSync,
+    readSync,
+    statSync,
+} from "node:fs";
 
 import type { FileSystem } from "./file-system.ts";
 
@@ -34,5 +41,26 @@ export class NodeFileSystem implements FileSystem {
             content = undefined;
         }
         return content;
+    }
+
+    readHead(path: string, maxBytes: number): string | undefined {
+        let descriptor: number | undefined;
+        let result: string | undefined;
+        try {
+            descriptor = openSync(path, "r");
+            const buffer = Buffer.allocUnsafe(maxBytes);
+            const bytesRead = readSync(descriptor, buffer, 0, maxBytes, 0);
+            result = buffer.subarray(0, bytesRead).toString("utf8");
+        } catch {
+            result = undefined;
+        }
+        if (descriptor !== undefined) {
+            try {
+                closeSync(descriptor);
+            } catch {
+                // The read result is what matters; a failing close is ignored.
+            }
+        }
+        return result;
     }
 }

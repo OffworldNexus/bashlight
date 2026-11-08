@@ -66,4 +66,14 @@ describe("NodeFileSystem", () => {
         expect(inspector.python(root)?.root).toBe(root);
         expect(inspector.python(root)?.declares("certifi")).toBe(true);
     });
+
+    test("readHead reads only the requested prefix", () => {
+        const file = join(root, "head.txt");
+        writeFileSync(file, "first line\nsecond line\n");
+        expect(fs.readHead(file, 10)).toBe("first line");
+        expect(fs.readHead(file, 1000)).toBe("first line\nsecond line\n");
+        expect(fs.readHead(file, 0)).toBe("");
+        expect(fs.readHead(join(root, "missing"), 10)).toBeUndefined();
+        expect(fs.readHead(root, 10)).toBeUndefined();
+    });
 });

@@ -34,6 +34,7 @@ export const PNPM_LOCK = "pnpm-lock.yaml";
 export const BUN_LOCK = "bun.lock";
 export const BUN_LOCKB = "bun.lockb";
 export const YARN_LOCK = "yarn.lock";
+export const YARNRC_YML = ".yarnrc.yml";
 export const NPM_LOCK = "package-lock.json";
 
 export const NODE_MODULES = "node_modules";

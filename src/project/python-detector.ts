@@ -1,3 +1,4 @@
+import { join, nearestSelfOrAncestor } from "../shared/posix-path.ts";
 import type { ToolchainDetector } from "./detector.ts";
 import type { FileSystem } from "./file-system.ts";
 import {
@@ -11,7 +12,6 @@ import {
     VENV_DIRS,
     VENV_PYTHON_PATH,
 } from "./manifests.ts";
-import { join, nearestSelfOrAncestor } from "./posix-path.ts";
 import { PythonToolchainImpl } from "./python-toolchain.ts";
 import { TomlDocument } from "./toml-reader.ts";
 import type { PythonManager, PythonToolchain } from "./toolchain.ts";

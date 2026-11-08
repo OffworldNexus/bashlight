@@ -64,6 +64,7 @@ type Outcome =
 
 ```
 src/
+  shared/    the only leaf module: pure POSIX path helpers, no dependencies
   syntax/    lexer, parser, AST (with exact source spans)
   interp/    static pre-interpreter: environment, word expansion, wrappers
   project/   project inspection (python/node toolchains) over a FileSystem
@@ -74,9 +75,9 @@ src/
   index.ts      public exports
 ```
 
-Dependency direction: `syntax` ← `interp` ← `rules` ← `rewrite` ← `bashlight` ←
-`opencode`. `project` only depends on its `FileSystem` interface; `rules` depend on
-`project` interfaces. No cycles.
+Dependency direction: `shared` ← `syntax` ← `interp` ← `rules` ← `rewrite` ← `bashlight`
+← `opencode`. `shared` depends on nothing; `project` only depends on its `FileSystem`
+interface; `rules` depend on `project` interfaces. No cycles.
 
 ### syntax — parser
 
@@ -307,6 +308,18 @@ Shared knowledge used by several rules lives in `rules/knowledge/` (e.g.
 `PythonCommandLine` that parses `python -m pip install`, `poetry run pytest`,
 `.venv/bin/python`, `uv run --with x python`… into `{ runner, tool, toolArgsOffset }`;
 `NodeCommandLine` the same for npm/pnpm/yarn/bun/npx).
+
+**Script shebangs.** When `argv[0]` is a path (`./manage.py`, `bin/cli`), the rules
+resolve it against `context.cwd` and read its shebang through `context.scripts` (a
+`ScriptInspector` over the same `FileSystem`, exposing `#!` as
+`{ interpreter, args, viaEnv, raw }`). `ScriptResolver` turns the path into
+`{ path, shebang }` and `PythonCommandLine`/`NodeCommandLine` map it to the interpreter
+it really runs, so `./manage.py migrate` in a uv project becomes
+`uv run ./manage.py migrate`, and `./bin/cli` with `#!/usr/bin/env tsx` becomes
+`pnpm exec tsx ./bin/cli`. An absolute Python interpreter (`#!/usr/bin/python3`)
+bypasses `PATH`, so the runner is followed by an explicit `python`; an unknown cwd, a
+missing shebang, or a non-Python/non-Node interpreter (bash, sh…) leaves the command
+untouched.
 
 Built-in rules (v1), each one class in `rules/builtin/`:
 

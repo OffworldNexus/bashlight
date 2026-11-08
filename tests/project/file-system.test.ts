@@ -31,4 +31,17 @@ describe("MemoryFileSystem", () => {
         expect(fs.exists("/w/api/poetry.lock/")).toBe(true);
         expect(fs.isDirectory("/w/api/")).toBe(true);
     });
+
+    test("readHead returns only the first bytes and never throws", () => {
+        const fs = new MemoryFileSystem({
+            "/w/manage.py": "#!/usr/bin/env python3\nprint(1)\n",
+        });
+        expect(fs.readHead("/w/manage.py", 22)).toBe("#!/usr/bin/env python3");
+        expect(fs.readHead("/w/manage.py", 1000)).toBe(
+            "#!/usr/bin/env python3\nprint(1)\n",
+        );
+        expect(fs.readHead("/w/manage.py", 0)).toBe("");
+        expect(fs.readHead("/w", 10)).toBeUndefined();
+        expect(fs.readHead("/missing", 10)).toBeUndefined();
+    });
 });

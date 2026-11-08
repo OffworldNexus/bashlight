@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    CachingProjectInspector,
     createProjectInspector,
     MemoizedDetector,
     MemoryFileSystem,
     type NodeToolchain,
-    ProjectInspector,
     type PythonToolchain,
     type ToolchainDetector,
 } from "../../src/project/index.ts";
@@ -69,7 +69,7 @@ describe("ProjectInspector", () => {
     test("memoizes detection when detectors are decorated", () => {
         const pythonCounter = { calls: 0 };
         const nodeCounter = { calls: 0 };
-        const inspector = new ProjectInspector(
+        const inspector = new CachingProjectInspector(
             new MemoizedDetector<PythonToolchain>(countingDetector(pythonCounter)),
             new MemoizedDetector<NodeToolchain>(countingDetector(nodeCounter)),
         );

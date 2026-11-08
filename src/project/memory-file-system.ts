@@ -1,5 +1,5 @@
+import { dirname, normalize } from "../shared/posix-path.ts";
 import type { FileSystem } from "./file-system.ts";
-import { dirname, normalize } from "./posix-path.ts";
 
 /**
  * A `FileSystem` backed by an in-memory tree, used by tests and corpus
@@ -34,6 +34,11 @@ export class MemoryFileSystem implements FileSystem {
     readText(path: string): string | undefined {
         const value = this.entries.get(normalize(path));
         return typeof value === "string" ? value : undefined;
+    }
+
+    readHead(path: string, maxBytes: number): string | undefined {
+        const value = this.readText(path);
+        return value === undefined ? undefined : value.slice(0, maxBytes);
     }
 
     private implyParents(path: string): void {

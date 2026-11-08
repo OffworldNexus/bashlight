@@ -1,7 +1,7 @@
+import { join } from "../shared/posix-path.ts";
 import type { FileSystem } from "./file-system.ts";
 import { isObject, type JsonObject, parseJsonObject } from "./json.ts";
 import { BIN_DIR, NODE_MODULES, PACKAGE_JSON } from "./manifests.ts";
-import { join } from "./posix-path.ts";
 import type { NodeManager, NodeToolchain } from "./toolchain.ts";
 
 const DEPENDENCY_FIELDS = [
@@ -33,6 +33,8 @@ export class NodeToolchainImpl implements NodeToolchain {
     constructor(
         private readonly fs: FileSystem,
         readonly manager: NodeManager,
+        readonly managerVersion: string | undefined,
+        readonly yarnBerry: boolean,
         readonly root: string,
         readonly workspaceRoot: string,
     ) {}

@@ -34,6 +34,10 @@ export interface PythonToolchain {
 export interface NodeToolchain {
     readonly ecosystem: "node";
     readonly manager: NodeManager;
+    /** Version from the `packageManager` field (e.g. `"4.1.0"`), if any. */
+    readonly managerVersion: string | undefined;
+    /** Whether this is a Yarn Berry (v2+) workspace (`.yarnrc.yml` or v2+). */
+    readonly yarnBerry: boolean;
     /** Absolute path of the innermost directory holding a `package.json`. */
     readonly root: string;
     /** Nearest ancestor-or-self that is a workspace root (lockfile/workspaces). */

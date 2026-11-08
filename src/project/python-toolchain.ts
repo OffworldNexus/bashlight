@@ -1,6 +1,6 @@
+import { join } from "../shared/posix-path.ts";
 import type { FileSystem } from "./file-system.ts";
 import { PDM_LOCK, PIPFILE, POETRY_LOCK, PYPROJECT, UV_LOCK } from "./manifests.ts";
-import { join } from "./posix-path.ts";
 import { TomlDocument } from "./toml-reader.ts";
 import type { PythonManager, PythonToolchain } from "./toolchain.ts";
 

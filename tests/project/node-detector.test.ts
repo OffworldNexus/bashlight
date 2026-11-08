@@ -144,3 +144,43 @@ describe("NodeToolchainDetector: workspaces and edge cases", () => {
         expect(tc?.hasScript("build")).toBe(false);
     });
 });
+
+describe("NodeToolchainDetector: yarn version", () => {
+    test("reports the packageManager version and classic yarn by default", () => {
+        const tc = detectNode(
+            {
+                "/w/api/package.json": `{ "name": "api", "packageManager": "yarn@1.22.22" }`,
+                "/w/api/yarn.lock": "",
+            },
+            "/w/api",
+        );
+        expect(tc?.manager).toBe("yarn");
+        expect(tc?.managerVersion).toBe("1.22.22");
+        expect(tc?.yarnBerry).toBe(false);
+    });
+
+    test("yarn 2+ is berry", () => {
+        const tc = detectNode(
+            {
+                "/w/api/package.json": `{ "name": "api", "packageManager": "yarn@4.1.0" }`,
+            },
+            "/w/api",
+        );
+        expect(tc?.manager).toBe("yarn");
+        expect(tc?.managerVersion).toBe("4.1.0");
+        expect(tc?.yarnBerry).toBe(true);
+    });
+
+    test(".yarnrc.yml at the workspace root implies berry", () => {
+        const tc = detectNode(
+            {
+                "/w/api/package.json": PKG,
+                "/w/api/yarn.lock": "",
+                "/w/api/.yarnrc.yml": "nodeLinker: node-modules\n",
+            },
+            "/w/api",
+        );
+        expect(tc?.manager).toBe("yarn");
+        expect(tc?.yarnBerry).toBe(true);
+    });
+});

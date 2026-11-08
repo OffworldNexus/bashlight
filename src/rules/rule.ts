@@ -8,6 +8,7 @@
  */
 import type { EnvironmentView, Host } from "../interp/context.ts";
 import type { ProjectInspector } from "../project/project-inspector.ts";
+import type { ScriptInspector } from "../project/script-inspector.ts";
 
 /** Where the value of an argument comes from in the script. */
 export type ArgOrigin =
@@ -41,6 +42,8 @@ export interface RuleContext {
     readonly cwd: string | undefined;
     readonly host: Host;
     readonly project: ProjectInspector;
+    /** Reads the shebang of script files (`./manage.py`, `bin/cli`…). */
+    readonly scripts: ScriptInspector;
 }
 
 /** One word of a replacement argv. */
