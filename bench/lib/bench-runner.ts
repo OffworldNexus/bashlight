@@ -189,6 +189,8 @@ export class BenchRunner {
         const isolated = this.deps.isolation.setup({
             runDirectory,
             projectDirectory,
+            mode: cell.mode,
+            pluginEntry: this.config.pluginEntry,
             sharedCache: this.config.sharedCache,
             apiKey: this.deps.credentials.key(),
             parentEnv: envRecord(),
@@ -209,11 +211,16 @@ export class BenchRunner {
                 0,
             );
         }
-        this.deps.isolation.installPlugin({
-            projectDirectory,
-            mode: cell.mode,
-            pluginEntry: this.config.pluginEntry,
-        });
+        // The plugin lives in the isolated global config root, so the project
+        // copy must be byte-for-byte the template: no `.opencode` anywhere.
+        if (this.deps.isolation.projectHasLocalConfig(projectDirectory)) {
+            this.writeArtifacts(runId, "", "", "project copy contains .opencode", "");
+            return this.errorRecord(
+                cell,
+                "project copy contains a .opencode directory",
+                0,
+            );
+        }
 
         const startedAt = new Date(this.deps.clock.now());
         const result = await this.deps.openCodeRunner.run({

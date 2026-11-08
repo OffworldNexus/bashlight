@@ -1,11 +1,18 @@
+/* eslint-disable sonarjs/function-return-type -- installGlobalPlugin returns a path only in with mode */
 /**
  * Isolating a benchmark run from the user's own OpenCode setup.
  *
  * Every run gets its own XDG tree, its own `HOME`, and a minimal
- * `opencode.json` with no MCP servers and no plugins (except bashlight, in
- * `with` mode). The child environment is built from a small allowlist rather
- * than inherited wholesale, so user config, credentials and MCP servers cannot
- * leak in. The OpenRouter key is passed only here, through the environment.
+ * `opencode.json` with no MCP servers. In `with` mode bashlight is installed
+ * the way a real user installs it — in the *global* config root's `plugins/`
+ * directory (`$XDG_CONFIG_HOME/opencode/plugins/bashlight.ts`) — never inside
+ * the project copy, which stays byte-for-byte the template. That keeps the
+ * plugin invisible to an agent exploring its working directory, so `with` and
+ * `without` differ only in whether bashlight rewrites the commands.
+ *
+ * The child environment is built from a small allowlist rather than inherited
+ * wholesale, so user config, credentials and MCP servers cannot leak in. The
+ * OpenRouter key is passed only here, through the environment.
  */
 
 import type { BenchFileSystem } from "./fs.ts";
@@ -17,6 +24,9 @@ export interface IsolationInput {
     readonly runDirectory: string;
     /** The fresh project copy the agent works in. */
     readonly projectDirectory: string;
+    readonly mode: Mode;
+    /** Absolute path of this checkout's `src/opencode/plugin.ts`. */
+    readonly pluginEntry: string;
     /** Shared package-manager cache root (poetry, uv, pip, pnpm). */
     readonly sharedCache: string;
     /** The OpenRouter key; never written down. */
@@ -30,6 +40,8 @@ export interface IsolatedEnvironment {
     readonly env: Readonly<Record<string, string>>;
     readonly configPath: string;
     readonly auditLogPath: string;
+    /** The global plugin file written in `with` mode, if any. */
+    readonly pluginPath?: string;
 }
 
 const INHERITED_KEYS = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL"] as const;
@@ -73,6 +85,7 @@ export class Isolation {
         }
         const configPath = `${configHome}/opencode/opencode.json`;
         this.fs.writeFile(configPath, configDocument());
+        const pluginPath = this.installGlobalPlugin(input, configHome);
         return {
             env: this.buildEnv(input, {
                 run,
@@ -84,27 +97,38 @@ export class Isolation {
             }),
             configPath,
             auditLogPath: `${dataHome}/bashlight/audit.jsonl`,
+            ...(pluginPath === undefined ? {} : { pluginPath }),
         };
     }
 
     /**
-     * Adds the bashlight plugin to a prepared project copy (`with` mode) or
-     * clears any project-local `.opencode` so nothing is discovered
-     * (`without` mode). Called after the template has been copied.
+     * In `with` mode, installs bashlight into the isolated **global** config
+     * root (`<configHome>/opencode/plugins/bashlight.ts`), the way a user
+     * installs it — never into the project copy. Returns the path written, or
+     * `undefined` in `without` mode.
      */
-    installPlugin(input: {
-        readonly projectDirectory: string;
-        readonly mode: Mode;
-        readonly pluginEntry: string;
-    }): void {
-        if (input.mode === "without") {
-            this.fs.remove(`${input.projectDirectory}/.opencode`);
-            return;
+    private installGlobalPlugin(
+        input: IsolationInput,
+        configHome: string,
+    ): string | undefined {
+        if (input.mode !== "with") {
+            return undefined;
         }
+        const path = `${configHome}/opencode/plugins/bashlight.ts`;
         this.fs.writeFile(
-            `${input.projectDirectory}/.opencode/plugins/bashlight.ts`,
+            path,
             `export { default } from ${JSON.stringify(input.pluginEntry)};\n`,
         );
+        return path;
+    }
+
+    /**
+     * Whether a project copy carries its own `.opencode` directory. It must
+     * not: the plugin lives in the global config root, and a project-local one
+     * would both confuse the run and be discoverable by the agent.
+     */
+    projectHasLocalConfig(projectDirectory: string): boolean {
+        return this.fs.exists(`${projectDirectory}/.opencode`);
     }
 
     /** Assembles the child environment from the allowlist plus bench values. */

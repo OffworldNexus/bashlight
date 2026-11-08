@@ -12,6 +12,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const fs = new NodeBenchFileSystem();
 const isolation = new Isolation(fs);
+const PLUGIN_ENTRY = "/repo/src/opencode/plugin.ts";
 
 function setup(mode: "with" | "without", name: string) {
     const runDirectory = join(root, name);
@@ -20,14 +21,11 @@ function setup(mode: "with" | "without", name: string) {
     const isolated = isolation.setup({
         runDirectory,
         projectDirectory,
+        mode,
+        pluginEntry: PLUGIN_ENTRY,
         sharedCache: "/shared-cache",
         apiKey: "sk-secret",
         parentEnv: { PATH: "/usr/bin", SECRET_FROM_USER: "leak" },
-    });
-    isolation.installPlugin({
-        projectDirectory,
-        mode,
-        pluginEntry: "/repo/src/opencode/plugin.ts",
     });
     return { runDirectory, projectDirectory, isolated };
 }
@@ -64,24 +62,35 @@ describe("Isolation", () => {
         );
     });
 
-    test("installs the plugin by re-export in with mode", () => {
-        const { projectDirectory } = setup("with", "plugin-with");
-        const plugin = readFileSync(
-            join(projectDirectory, ".opencode/plugins/bashlight.ts"),
-            "utf8",
+    test("installs the plugin in the global config root, not the project", () => {
+        const { runDirectory, projectDirectory, isolated } = setup(
+            "with",
+            "plugin-with",
         );
-        expect(plugin).toContain("/repo/src/opencode/plugin.ts");
+        const pluginPath = join(runDirectory, "config/opencode/plugins/bashlight.ts");
+        expect(isolated.pluginPath).toBe(pluginPath);
+        const plugin = readFileSync(pluginPath, "utf8");
+        expect(plugin).toContain(PLUGIN_ENTRY);
+        // The project copy stays untouched: no `.opencode`, no plugin file.
+        expect(isolation.projectHasLocalConfig(projectDirectory)).toBe(false);
+        expect(fs.exists(join(projectDirectory, ".opencode"))).toBe(false);
     });
 
-    test("removes any project-local .opencode in without mode", () => {
-        const runDirectory = join(root, "plugin-without");
-        const projectDirectory = join(runDirectory, "project");
+    test("writes no plugin in without mode", () => {
+        const { runDirectory, projectDirectory, isolated } = setup(
+            "without",
+            "plugin-without",
+        );
+        expect(isolated.pluginPath).toBeUndefined();
+        expect(
+            fs.exists(join(runDirectory, "config/opencode/plugins/bashlight.ts")),
+        ).toBe(false);
+        expect(isolation.projectHasLocalConfig(projectDirectory)).toBe(false);
+    });
+
+    test("detects a project-local .opencode", () => {
+        const { projectDirectory } = setup("without", "project-local");
         fs.writeFile(join(projectDirectory, ".opencode/plugins/x.ts"), "x");
-        isolation.installPlugin({
-            projectDirectory,
-            mode: "without",
-            pluginEntry: "/p",
-        });
-        expect(fs.exists(join(projectDirectory, ".opencode"))).toBe(false);
+        expect(isolation.projectHasLocalConfig(projectDirectory)).toBe(true);
     });
 });
