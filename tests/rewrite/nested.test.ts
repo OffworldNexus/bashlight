@@ -50,4 +50,30 @@ describe("nested documents", () => {
             "bash -c 'true && z'",
         );
     });
+
+    test("maps a joined watch invocation per argument", () => {
+        const prefix = replaceCommand("x", () => ({
+            kind: "replace",
+            argv: [
+                { kind: "text", value: "z" },
+                { kind: "arg", index: 0 },
+                { kind: "arg", index: 1 },
+            ],
+            reason: "test",
+        }));
+        expect(commandWithRules([prefix], "watch x a")).toBe("watch z x a");
+    });
+
+    test("maps an eval (builtin) joined invocation per argument", () => {
+        const prefix = replaceCommand("x", () => ({
+            kind: "replace",
+            argv: [
+                { kind: "text", value: "z" },
+                { kind: "arg", index: 0 },
+                { kind: "arg", index: 1 },
+            ],
+            reason: "test",
+        }));
+        expect(commandWithRules([prefix], "eval x a")).toBe("eval z x a");
+    });
 });

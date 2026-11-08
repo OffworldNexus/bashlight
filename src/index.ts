@@ -25,7 +25,6 @@ export type {
     RuleScope,
     Verdict,
 } from "./rules/rule.ts";
-export { type AppliedRule, type Decision, RuleEngine } from "./rules/rule-engine.ts";
 export {
     arg,
     argsFrom,
@@ -33,6 +32,5 @@ export {
     indexRange,
     keep,
     replace,
-    ReplacementResolver,
     text,
 } from "./rules/verdict.ts";

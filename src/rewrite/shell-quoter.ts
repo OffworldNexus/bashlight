@@ -33,4 +33,14 @@ export class ShellQuoter {
     join(values: readonly string[], context: QuoteContext = "unquoted"): string {
         return values.map((value) => this.quote(value, context)).join(" ");
     }
+
+    /** `value` wrapped in single quotes. */
+    single(value: string): string {
+        return `'${this.quote(value, "single")}'`;
+    }
+
+    /** `value` wrapped in double quotes. */
+    double(value: string): string {
+        return `"${this.quote(value, "double")}"`;
+    }
 }

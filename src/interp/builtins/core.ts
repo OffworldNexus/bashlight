@@ -92,7 +92,6 @@ const PASSTHROUGH = [
     "ulimit",
     "jobs",
     "kill",
-    "let",
     "eval",
     "exec",
     "command",
@@ -114,5 +113,31 @@ export class PassthroughBuiltin implements Builtin {
 
     apply(): void {
         // Nothing to model.
+    }
+}
+
+const ARITHMETIC_NAME = /[A-Za-z_]\w*/g;
+
+/**
+ * `let` evaluates arithmetic but we model no effect; we do record every name it
+ * reads so the rewriter never folds a variable whose value `let` observes.
+ */
+export class LetBuiltin implements Builtin {
+    readonly names = ["let"] as const;
+
+    apply(input: BuiltinInput): void {
+        const node = input.argv[0]?.word;
+        if (node === undefined) {
+            return;
+        }
+        const names = new Set<string>();
+        for (const arg of input.argv.slice(1)) {
+            for (const name of arg.value?.match(ARITHMETIC_NAME) ?? []) {
+                names.add(name);
+            }
+        }
+        for (const name of names) {
+            input.store.recordRead(input.scope, name, node, input.doc);
+        }
     }
 }

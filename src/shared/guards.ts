@@ -10,3 +10,11 @@
 export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/** Element-wise equality of two arrays; `undefined` values compare equal. */
+export function sameValues<T>(
+    left: readonly (T | undefined)[],
+    right: readonly (T | undefined)[],
+): boolean {
+    return left.length === right.length && left.every((value, i) => value === right[i]);
+}

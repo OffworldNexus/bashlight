@@ -1,4 +1,4 @@
-/* eslint-disable sonarjs/function-return-type, sonarjs/cognitive-complexity */
+/* eslint-disable sonarjs/function-return-type */
 /**
  * Strategy 2: folding a change to every use of a variable back into the
  * assignment that produced its value (`P="poetry run python"` instead of
@@ -13,8 +13,10 @@
 import type { Binding } from "../interp/binding.ts";
 import type { ScriptDocument } from "../interp/documents.ts";
 import { type Arg, soleBinding } from "../interp/values.ts";
-import type { Assignment, Word, WordPart } from "../syntax/index.ts";
+import { indexRange } from "../rules/verdict.ts";
+import type { Word, WordPart } from "../syntax/index.ts";
 import type { ShellQuoter } from "./shell-quoter.ts";
+import { wordRuns } from "./word-runs.ts";
 
 export type ValueStyle = "single" | "double" | "bare";
 
@@ -26,15 +28,9 @@ export interface BindingWord {
 
 /** Every word of `args` that is one whole unquoted `$NAME`/`${NAME}` expansion. */
 export function bindingWords(args: readonly Arg[]): BindingWord[] {
-    const seen = new Set<unknown>();
     const out: BindingWord[] = [];
-    for (let index = 0; index < args.length; index += 1) {
-        const arg = args[index];
-        if (arg === undefined || seen.has(arg.word)) {
-            continue;
-        }
-        seen.add(arg.word);
-        const candidate = bindingWordAt(args, index);
+    for (const run of wordRuns(args)) {
+        const candidate = bindingWordFor(run.word, run.args, run.start, run.end);
         if (candidate !== undefined) {
             out.push(candidate);
         }
@@ -42,33 +38,28 @@ export function bindingWords(args: readonly Arg[]): BindingWord[] {
     return out;
 }
 
-export function bindingWordAt(
+function bindingWordFor(
+    word: Word,
     args: readonly Arg[],
-    index: number,
+    start: number,
+    end: number,
 ): BindingWord | undefined {
-    const arg = args[index];
-    if (arg === undefined) {
-        return undefined;
-    }
-    const parts = arg.word.parts;
+    const parts = word.parts;
     if (parts.length !== 1 || parts[0]?.kind !== "ParameterExpansion") {
         return undefined;
     }
-    const binding = soleBinding(arg);
+    const first = args[0];
+    if (first === undefined) {
+        return undefined;
+    }
+    const binding = soleBinding(first);
     if (binding === undefined) {
         return undefined;
     }
-    const fieldIndices: number[] = [];
-    for (let position = 0; position < args.length; position += 1) {
-        const other = args[position];
-        if (other !== undefined && other.word === arg.word) {
-            if (soleBinding(other) !== binding) {
-                return undefined;
-            }
-            fieldIndices.push(position);
-        }
+    if (!args.every((arg) => soleBinding(arg) === binding)) {
+        return undefined;
     }
-    return { binding, word: arg.word, fieldIndices };
+    return { binding, word, fieldIndices: indexRange(start, end) };
 }
 
 export interface EditableValue {
@@ -79,12 +70,10 @@ export interface EditableValue {
 }
 
 /** The editable value of an assignment, when it has a simple quotable shape. */
-export function editableValue(
-    binding: Binding,
-    doc: ScriptDocument,
-): EditableValue | undefined {
+export function editableValue(binding: Binding): EditableValue | undefined {
     const assignment = binding.assignment;
-    if (assignment === undefined) {
+    const doc = binding.doc;
+    if (assignment === undefined || doc === undefined) {
         return undefined;
     }
     if (assignment.kind === "synthetic") {
@@ -95,9 +84,6 @@ export function editableValue(
             return undefined;
         }
         if (assignment.value.kind !== "Word") {
-            return undefined;
-        }
-        if (!matchesAssignment(doc, assignment)) {
             return undefined;
         }
         const style = valueStyle(assignment.value);
@@ -123,12 +109,6 @@ export function editableValue(
     if (eq === -1) {
         return undefined;
     }
-    if (
-        doc.text.slice(word.span.start, word.span.start + eq) !==
-        `${assignment.parsed.name}=`
-    ) {
-        return undefined;
-    }
     const start = first.span.start + eq + 1;
     const end = word.span.end;
     if (word.parts.length === 1) {
@@ -140,16 +120,6 @@ export function editableValue(
     }
     const style = partStyle(valuePart);
     return style === undefined ? undefined : { doc, start, end, style };
-}
-
-/**
- * Whether the assignment's span really lives in `doc`. The interpreter leaves
- * `Binding.doc` undefined, so the rewriter recovers the document from the uses
- * and checks the source text actually starts with the assignment's name.
- */
-function matchesAssignment(doc: ScriptDocument, assignment: Assignment): boolean {
-    const raw = doc.text.slice(assignment.nameSpan.start, assignment.nameSpan.end);
-    return raw === assignment.name && raw.length > 0;
 }
 
 function valueStyle(word: Word): ValueStyle | undefined {
@@ -183,10 +153,10 @@ export function renderValue(
     quoter: ShellQuoter,
 ): string {
     if (style === "single") {
-        return `'${value.replaceAll("'", "'\\''")}'`;
+        return quoter.single(value);
     }
     if (style === "double") {
-        return `"${value.replace(/[\\$`"]/g, "\\$&")}"`;
+        return quoter.double(value);
     }
     return quoter.quote(value);
 }

@@ -41,6 +41,18 @@ export interface Fragment {
     /** The decoded text, or `undefined` when statically unknown. */
     readonly text: string | undefined;
     readonly origin: Origin;
+    /**
+     * Bindings this fragment *reads* even though its value is computed
+     * (`${#P}`, `${P:-x}`, `$((P+1))`…). The rewriter refuses to fold a
+     * binding when any of its uses is not a plain `$P` field.
+     */
+    readonly reads?: readonly Read[];
+}
+
+/** A variable read that produced a computed value. */
+export interface Read {
+    readonly binding: Binding;
+    readonly part: Node;
 }
 
 /** Where an arg sits in the field splitting of its word. */

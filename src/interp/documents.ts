@@ -34,6 +34,18 @@ export interface ScriptDocument extends SourceDocument {
     readonly nesting: Nesting | undefined;
 }
 
+/**
+ * The `ScriptDocument` a document was nested in, when there is one. The
+ * interpreter only ever nests `ScriptDocument`s, so this narrows the parent
+ * without a cast at every call site.
+ */
+export function parentDocument(doc: SourceDocument): ScriptDocument | undefined {
+    const parent = doc.parent?.doc;
+    return parent !== undefined && "nesting" in parent
+        ? (parent as ScriptDocument)
+        : undefined;
+}
+
 export function createScriptDocument(
     text: string,
     options: { readonly parent?: NestedOrigin; readonly nesting?: Nesting } = {},

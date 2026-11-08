@@ -8,7 +8,7 @@ import type { Invocation } from "../interp/invocation.ts";
 import type { Arg } from "../interp/values.ts";
 import type { ArgOrigin, CommandCall } from "../rules/rule.ts";
 
-export function classifyArg(arg: Arg): ArgOrigin {
+function classifyArg(arg: Arg): ArgOrigin {
     const fragments = arg.fragments;
     if (fragments.length > 0 && fragments.every((f) => f.origin.kind === "literal")) {
         return "literal";
@@ -45,4 +45,9 @@ export function toCommandCall(invocation: Invocation): CommandCall {
 /** Only external commands with a known `argv[0]` are shown to the rules. */
 export function isSubmitted(invocation: Invocation): boolean {
     return invocation.kind === "external" && invocation.argv[0]?.value !== undefined;
+}
+
+/** Index of a `fullArgv` entry within the invocation's effective `argv`. */
+export function toArgvIndex(invocation: Invocation, fullIndex: number): number {
+    return fullIndex - invocation.offset;
 }

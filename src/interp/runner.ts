@@ -14,7 +14,7 @@ import { stringValues } from "./documents.ts";
 import { type Environment, type Scope, type VariableEntry } from "./environment.ts";
 import type { WordExpander } from "./expander.ts";
 import type { ShellStdin, StdinSource } from "./interfaces.ts";
-import type { Invocation, WrapperRef } from "./invocation.ts";
+import type { Invocation, InvocationRedirect, WrapperRef } from "./invocation.ts";
 import type { InterpretSession } from "./session.ts";
 import type { Arg } from "./values.ts";
 import type { CommandWalker } from "./walker.ts";
@@ -46,6 +46,7 @@ interface ExpandedCommand {
     readonly pending: readonly PendingUse[];
     readonly assignments: readonly Binding[];
     readonly prefixNames: readonly string[];
+    readonly redirects: readonly InvocationRedirect[];
     readonly commandEnvScope: Scope;
     readonly baseScope: Scope;
 }
@@ -60,7 +61,8 @@ export class CommandRunner {
     ) {}
 
     runSimpleCommand(command: SimpleCommand, doc: ScriptDocument, scope: Scope): void {
-        const ownStdin = this.walker.expandRedirects(command.redirects, doc, scope);
+        const redirects = this.walker.expandRedirects(command.redirects, doc, scope);
+        const ownStdin = redirects.stdin;
 
         if (command.words.length === 0) {
             this.persistAssignments(command, doc, scope);
@@ -78,7 +80,9 @@ export class CommandRunner {
         const fullArgv: Arg[] = [];
         const pending: PendingUse[] = [];
         for (const word of command.words) {
-            const expansion = this.expander.expandWord(word, doc, commandEnvScope);
+            // Prefix assignments are visible to the command's environment, not
+            // to the word expansions of the same command (`A=1 echo $A`).
+            const expansion = this.expander.expandWord(word, doc, scope);
             const base = fullArgv.length;
             for (const arg of expansion.args) {
                 fullArgv.push(arg);
@@ -103,6 +107,7 @@ export class CommandRunner {
             pending,
             assignments: prefixBindings,
             prefixNames: prefixBindings.map((binding) => binding.name),
+            redirects: redirects.redirects,
             commandEnvScope,
             baseScope: scope,
         };
@@ -188,6 +193,7 @@ export class CommandRunner {
         return this.session.setExpanded(scope, assignment.name, fragments, {
             exported,
             assignment,
+            doc,
         });
     }
 
@@ -380,6 +386,7 @@ export class CommandRunner {
             assignments: expanded.assignments,
             env: context.env,
             context,
+            redirects: expanded.redirects,
             speculative: this.session.isSpeculative,
         };
         this.session.record(invocation, expanded.pending);
@@ -404,6 +411,7 @@ export class CommandRunner {
             assignments: expanded.assignments,
             env: context.env,
             context,
+            redirects: expanded.redirects,
             speculative: this.session.isSpeculative,
         };
         this.session.record(invocation, expanded.pending);

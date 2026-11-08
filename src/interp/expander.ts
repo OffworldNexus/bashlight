@@ -34,6 +34,7 @@ import {
     literalFragment,
     makeArg,
     type Quoting,
+    type Read,
     unknownFragment,
 } from "./values.ts";
 
@@ -146,6 +147,7 @@ class WordExpansion {
         readonly scope: Scope,
         readonly state: State,
         readonly embedded: EmbeddedScript[],
+        readonly reads: Read[] = [],
         readonly builder = new FieldBuilder(),
     ) {}
 }
@@ -211,8 +213,9 @@ export class WordExpander {
         const fields: Fragment[][] = splitting ? [] : [[]];
         const state: State = { glob: false, unknownCount: false };
         const embedded: EmbeddedScript[] = [];
+        const reads: Read[] = [];
         for (const parts of combinations) {
-            const expansion = new WordExpansion(doc, scope, state, embedded);
+            const expansion = new WordExpansion(doc, scope, state, embedded, reads);
             this.expandParts(expansion, parts, false, options);
             if (splitting) {
                 for (const descs of expansion.builder.fields) {
@@ -226,6 +229,7 @@ export class WordExpander {
                 }
             }
         }
+        attachReads(fields, reads);
         return { fields, glob: state.glob, unknownCount: state.unknownCount, embedded };
     }
 
@@ -348,9 +352,10 @@ export class WordExpander {
         part: ArithmeticExpansionPart,
         quoted: boolean,
     ): void {
-        const value = evaluateArithmetic(part.expression, (name) =>
-            expansion.scope.env.lookup(name),
-        );
+        const value = evaluateArithmetic(part.expression, (name) => {
+            recordRead(expansion, part, name);
+            return expansion.scope.env.lookup(name);
+        });
         if (value === undefined) {
             this.addUnknown(expansion, part, quoted, "arithmetic");
             return;
@@ -363,6 +368,9 @@ export class WordExpander {
         part: ParameterExpansionPart,
         quoted: boolean,
     ): void {
+        if (!isSpecialParameter(part.name)) {
+            recordRead(expansion, part, part.name);
+        }
         if (part.length) {
             this.expandLength(expansion, part, quoted);
             return;
@@ -725,6 +733,7 @@ export class WordExpander {
             expansion.scope,
             { glob: false, unknownCount: false },
             expansion.embedded,
+            expansion.reads,
         );
         this.expandParts(sub, part.argument.parts, false, {});
         const fragments: Fragment[] = [];
@@ -866,29 +875,57 @@ function splitFields(text: string, ifs: string): string[] {
     return fields;
 }
 
+interface UseEntry {
+    readonly binding: Binding;
+    readonly part: Node;
+    readonly indexes: Set<number>;
+}
+
+function addUse(
+    entries: UseEntry[],
+    binding: Binding | undefined,
+    part: Node | undefined,
+    index: number,
+): void {
+    if (binding === undefined || part === undefined) {
+        return;
+    }
+    const existing = entries.find(
+        (entry) => entry.binding === binding && entry.part === part,
+    );
+    if (existing === undefined) {
+        entries.push({ binding, part, indexes: new Set([index]) });
+    } else {
+        existing.indexes.add(index);
+    }
+}
+
+function fragmentReads(fragment: Fragment): readonly {
+    binding: Binding;
+    part: Node;
+}[] {
+    const reads: { binding: Binding; part: Node }[] = [];
+    if (fragment.origin.kind === "binding") {
+        reads.push({ binding: fragment.origin.binding, part: fragment.origin.part });
+    }
+    for (const read of fragment.reads ?? []) {
+        reads.push({ binding: read.binding, part: read.part });
+    }
+    return reads;
+}
+
 function collectUses(args: readonly Arg[], doc: ScriptDocument): readonly PendingUse[] {
-    const byPart = new Map<
-        ParameterExpansionPart,
-        { binding: Binding; indexes: Set<number> }
-    >();
+    const entries: UseEntry[] = [];
     args.forEach((arg, index) => {
         for (const fragment of arg.fragments) {
-            if (fragment.origin.kind === "binding") {
-                const entry = byPart.get(fragment.origin.part);
-                if (entry === undefined) {
-                    byPart.set(fragment.origin.part, {
-                        binding: fragment.origin.binding,
-                        indexes: new Set([index]),
-                    });
-                } else {
-                    entry.indexes.add(index);
-                }
+            for (const read of fragmentReads(fragment)) {
+                addUse(entries, read.binding, read.part, index);
             }
         }
     });
-    return [...byPart].map(([part, entry]) => ({
+    return entries.map((entry) => ({
         binding: entry.binding,
-        part,
+        part: entry.part,
         doc,
         indexes: [...entry.indexes],
     }));
@@ -898,18 +935,41 @@ function collectFragmentUses(
     fragments: readonly Fragment[],
     doc: ScriptDocument,
 ): readonly PendingUse[] {
-    const byPart = new Map<ParameterExpansionPart, Binding>();
+    const entries: UseEntry[] = [];
     for (const fragment of fragments) {
-        if (fragment.origin.kind === "binding") {
-            byPart.set(fragment.origin.part, fragment.origin.binding);
+        for (const read of fragmentReads(fragment)) {
+            addUse(entries, read.binding, read.part, -1);
         }
     }
-    return [...byPart].map(([part, binding]) => ({
-        binding,
-        part,
+    return entries.map((entry) => ({
+        binding: entry.binding,
+        part: entry.part,
         doc,
         indexes: [],
     }));
+}
+
+/** Records that an expansion read `name`, even when the value is computed. */
+function recordRead(expansion: WordExpansion, node: Node, name: string): void {
+    const binding = expansion.scope.env.entry(name)?.binding;
+    if (binding !== undefined) {
+        expansion.reads.push({ binding, part: node });
+    }
+}
+
+/** Copies the read set of a word onto every fragment it produced. */
+function attachReads(fields: Fragment[][], reads: readonly Read[]): void {
+    if (reads.length === 0) {
+        return;
+    }
+    for (const field of fields) {
+        for (let index = 0; index < field.length; index += 1) {
+            const fragment = field[index];
+            if (fragment !== undefined) {
+                field[index] = { ...fragment, reads };
+            }
+        }
+    }
 }
 
 /** Splices out the leading `NAME=` / `NAME+=` characters of an assignment word. */

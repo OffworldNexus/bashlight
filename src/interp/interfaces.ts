@@ -3,7 +3,7 @@
  * never see the whole `InterpretSession`.
  */
 
-import type { Redirect, Script, Word } from "../syntax/index.ts";
+import type { Node, Redirect, Script, Word } from "../syntax/index.ts";
 import type { Binding, BindingSource, PendingUse } from "./binding.ts";
 import type { VariableState } from "./context.ts";
 import type { ScriptDocument } from "./documents.ts";
@@ -14,6 +14,8 @@ import type { Fragment } from "./values.ts";
 export interface SetValueOptions {
     readonly exported?: boolean;
     readonly assignment?: BindingSource;
+    /** The document the assignment was written in, for the rewriter. */
+    readonly doc?: ScriptDocument;
 }
 
 /** The variable/function operations a builtin may perform. */
@@ -40,6 +42,8 @@ export interface VariableStore {
     markExported(scope: Scope, name: string, exported: boolean): void;
     removeVariable(scope: Scope, name: string): void;
     removeFunction(scope: Scope, name: string): void;
+    /** Records that `name` was read (`(( ))`, `let`), for the rewriter. */
+    recordRead(scope: Scope, name: string, node: Node, doc: ScriptDocument): void;
     expandAssignmentWord(word: Word, doc: ScriptDocument, scope: Scope): ExpandedValue;
     /** Enters a function frame so `local`/`declare` are restored on return. */
     enterFunctionFrame(): void;

@@ -17,6 +17,17 @@ export interface WrapperRef {
     readonly offset: number;
 }
 
+/** One redirection as it will actually run, expanded for the validator. */
+export interface InvocationRedirect {
+    /** `"1"`, `"2"`, `"{fd}"`, or `""` for the operator's default. */
+    readonly fd: string;
+    readonly operator: string;
+    /** The expanded target, or `undefined` for a heredoc / unknown. */
+    readonly target: string | undefined;
+    /** The expanded heredoc body, or `undefined` for other redirects. */
+    readonly heredoc: string | undefined;
+}
+
 export interface Invocation {
     readonly kind: "external" | "builtin" | "function";
     /** The AST node as written. */
@@ -34,6 +45,8 @@ export interface Invocation {
     /** What the command sees; equal to `context.env`. */
     readonly env: EnvironmentView;
     readonly context: ExecutionContext;
+    /** Every redirection of the command, expanded, for validation. */
+    readonly redirects: readonly InvocationRedirect[];
     /**
      * True when the invocation comes from a function body that is only visited
      * speculatively (a function that is never called).

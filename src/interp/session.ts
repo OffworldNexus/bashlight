@@ -29,7 +29,7 @@ import {
     type VariableEntry,
 } from "./environment.ts";
 import type { WordExpander } from "./expander.ts";
-import type { ExpansionHost, VariableStore } from "./interfaces.ts";
+import type { ExpansionHost, SetValueOptions, VariableStore } from "./interfaces.ts";
 import type { Invocation } from "./invocation.ts";
 import { type Fragment, fragmentsValue, type Origin } from "./values.ts";
 import type { WrapperRegistry } from "./wrappers/registry.ts";
@@ -205,10 +205,7 @@ export class InterpretSession implements VariableStore, ExpansionHost {
         scope: Scope,
         name: string,
         value: string,
-        options: {
-            readonly exported?: boolean;
-            readonly assignment?: BindingSource;
-        } = {},
+        options: SetValueOptions = {},
     ): Binding {
         return this.setFragments(
             scope,
@@ -234,10 +231,7 @@ export class InterpretSession implements VariableStore, ExpansionHost {
         scope: Scope,
         name: string,
         fragments: readonly Fragment[],
-        options: {
-            readonly exported?: boolean;
-            readonly assignment?: BindingSource;
-        } = {},
+        options: SetValueOptions = {},
     ): Binding {
         return this.setFragments(scope, name, fragments, options);
     }
@@ -262,6 +256,15 @@ export class InterpretSession implements VariableStore, ExpansionHost {
 
     removeFunction(scope: Scope, name: string): void {
         scope.env.functions.delete(name);
+    }
+
+    recordRead(scope: Scope, name: string, node: Node, doc: ScriptDocument): void {
+        const binding = scope.env.entry(name)?.binding;
+        if (binding !== undefined) {
+            this.recordUses([{ binding, part: node, doc, indexes: [] }], {
+                kind: "other",
+            });
+        }
     }
 
     expandAssignmentWord(
@@ -356,14 +359,14 @@ export class InterpretSession implements VariableStore, ExpansionHost {
         scope: Scope,
         name: string,
         fragments: readonly Fragment[],
-        options: { readonly exported?: boolean; readonly assignment?: BindingSource },
+        options: SetValueOptions,
     ): Binding {
         const exported = options.exported ?? this.isExported(scope, name);
         const binding = makeBinding(
             name,
             fragments,
             options.assignment,
-            undefined,
+            options.doc,
             exported,
         );
         this.bindings.push(binding);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createInterpreter, type Interpretation } from "../../src/interp/index.ts";
+import { buildExpected } from "../../src/rewrite/expected.ts";
 import { type ExpectedInvocation, validate } from "../../src/rewrite/validator.ts";
 
 const INITIAL = { cwd: "/", variables: {}, complete: true };
@@ -9,14 +10,14 @@ function interpret(command: string): Interpretation {
     return createInterpreter().interpret(command, INITIAL);
 }
 
+/** Builds the expected shape from a reference interpretation of `command`. */
 function expected(command: string): ExpectedInvocation[] {
-    return interpret(command).invocations.map((invocation) => ({
-        kind: invocation.kind,
-        argv: invocation.argv.map((arg) => arg.value),
-        cwd: invocation.context.cwd,
-        host: invocation.context.host,
-        env: {},
-    }));
+    const reference = interpret(command);
+    return buildExpected({
+        interpretation: reference,
+        plan: { rewritten: [], overrides: new Map(), bindingValues: new Map() },
+        ownerOf: new Map(),
+    });
 }
 
 describe("validate", () => {
@@ -25,8 +26,7 @@ describe("validate", () => {
     });
 
     test("rejects a changed argv", () => {
-        const result = validate(interpret("x b"), expected("x a"));
-        expect(result.ok).toBe(false);
+        expect(validate(interpret("x b"), expected("x a")).ok).toBe(false);
     });
 
     test("rejects a different invocation count", () => {
@@ -41,14 +41,30 @@ describe("validate", () => {
         expect(validate(interpret("x a"), moved).ok).toBe(false);
     });
 
-    test("checks that env injections landed", () => {
+    test("rejects a changed redirect target", () => {
+        expect(validate(interpret("x a > b"), expected("x a > c")).ok).toBe(false);
+    });
+
+    test("rejects a changed heredoc body", () => {
+        const before = "cat <<EOF\none\nEOF";
+        const after = "cat <<EOF\ntwo\nEOF";
+        expect(validate(interpret(after), expected(before)).ok).toBe(false);
+    });
+
+    test("rejects a changed prefix assignment", () => {
+        expect(validate(interpret("A=2 x"), expected("A=1 x")).ok).toBe(false);
+    });
+
+    test("checks that injected variables landed", () => {
         const wanted: ExpectedInvocation[] = [
             {
                 kind: "external",
                 argv: ["y"],
                 cwd: "/",
                 host: { kind: "local" },
-                env: { FOO: "bar" },
+                injected: { FOO: "bar" },
+                env: {},
+                redirects: [],
             },
         ];
         expect(validate(interpret("FOO=bar y"), wanted).ok).toBe(true);

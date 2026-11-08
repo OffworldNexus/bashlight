@@ -32,6 +32,7 @@ import {
 import { type Environment, forkScope, type Scope } from "./environment.ts";
 import type { WordExpander } from "./expander.ts";
 import type { ShellStdin, StdinSource } from "./interfaces.ts";
+import type { Invocation, InvocationRedirect } from "./invocation.ts";
 import { CommandRunner } from "./runner.ts";
 import type { InterpretSession } from "./session.ts";
 
@@ -148,6 +149,7 @@ export class CommandWalker {
                 return;
             case "ArithmeticCommand":
                 this.expandRedirects(command.redirects, doc, scope);
+                this.recordArithmeticReads(command.expression, command, doc, scope);
                 return;
             case "TestCommand":
                 this.expandRedirects(command.redirects, doc, scope);
@@ -258,20 +260,27 @@ export class CommandWalker {
 
     /**
      * Expands every redirection exactly once and returns the command's own
-     * stdin heredoc/herestring, if any (so a heredoc feeding a shell is never
-     * expanded twice).
+     * stdin heredoc/herestring (so a heredoc feeding a shell is never expanded
+     * twice) plus the expanded redirections for the validator.
      */
     expandRedirects(
         redirects: readonly Redirect[],
         doc: ScriptDocument,
         scope: Scope,
-    ): ShellStdin | undefined {
+    ): { stdin: ShellStdin | undefined; redirects: InvocationRedirect[] } {
         let stdin: ShellStdin | undefined;
+        const expandedRedirects: InvocationRedirect[] = [];
         for (const redirect of redirects) {
             if (redirect.operator === "<<" || redirect.operator === "<<-") {
                 const here = redirect.target as HereDoc;
                 if (here.kind === "HereDoc") {
                     const source = this.expandHeredoc(here, redirect, doc, scope);
+                    expandedRedirects.push({
+                        fd: redirectFd(redirect),
+                        operator: redirect.operator,
+                        target: undefined,
+                        heredoc: source?.text,
+                    });
                     if (redirectIsStdin(redirect)) {
                         stdin ??= source;
                     }
@@ -285,6 +294,12 @@ export class CommandWalker {
             );
             this.session.recordUses(expanded.uses, { kind: "redirect" });
             this.runEmbeddedJobs(expanded.embedded, scope);
+            expandedRedirects.push({
+                fd: redirectFd(redirect),
+                operator: redirect.operator,
+                target: expanded.value,
+                heredoc: undefined,
+            });
             if (
                 redirect.operator === "<<<" &&
                 redirectIsStdin(redirect) &&
@@ -298,7 +313,7 @@ export class CommandWalker {
                 };
             }
         }
-        return stdin;
+        return { stdin, redirects: expandedRedirects };
     }
 
     private expandHeredoc(
@@ -321,6 +336,23 @@ export class CommandWalker {
             return undefined;
         }
         return { text: expanded.value, span: here.bodySpan, redirect };
+    }
+
+    /** Records the names `(( … ))` reads, so the rewriter never folds them. */
+    private recordArithmeticReads(
+        expression: string,
+        node: Command,
+        doc: ScriptDocument,
+        scope: Scope,
+    ): void {
+        for (const name of new Set(expression.match(ARITHMETIC_NAME) ?? [])) {
+            const binding = scope.env.entry(name)?.binding;
+            if (binding !== undefined) {
+                this.session.recordUses([{ binding, part: node, doc, indexes: [] }], {
+                    kind: "other",
+                });
+            }
+        }
     }
 
     /** A `StdinSource` for one command: its own heredoc, else the inherited one. */
@@ -375,7 +407,7 @@ export class CommandWalker {
     /** Parses and runs a script read from an argument or a heredoc. */
     runScriptSource(
         source: ScriptSource,
-        invocation: import("./invocation.ts").Invocation,
+        invocation: Invocation,
         scope: Scope,
         stdinText: string | undefined,
     ): void {
@@ -435,10 +467,22 @@ export class CommandWalker {
     }
 }
 
+/** Variable names inside an arithmetic expression. */
+const ARITHMETIC_NAME = /[A-Za-z_]\w*/g;
+
 /** A heredoc/herestring is on stdin when its fd is 0 or unspecified. */
 export function redirectIsStdin(redirect: Redirect): boolean {
     const fd = redirect.fd;
     return fd === undefined || (fd.kind === "number" && fd.fd === 0);
+}
+
+/** The redirect's file descriptor as a stable string (`""` for the default). */
+function redirectFd(redirect: Redirect): string {
+    const fd = redirect.fd;
+    if (fd === undefined) {
+        return "";
+    }
+    return fd.kind === "number" ? String(fd.fd) : `{${fd.name}}`;
 }
 
 function pipelineTerminates(pipeline: Pipeline): boolean {

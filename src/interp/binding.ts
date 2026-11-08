@@ -8,7 +8,7 @@
 import type {
     Assignment,
     AssignmentWord,
-    ParameterExpansionPart,
+    Node,
     SourceDocument,
     Word,
 } from "../syntax/index.ts";
@@ -57,7 +57,8 @@ export type UseSite =
 
 export interface BindingUse {
     readonly binding: Binding;
-    readonly part: ParameterExpansionPart;
+    /** The node that triggered the read (a parameter expansion, an arithmetic part…). */
+    readonly part: Node;
     readonly doc: SourceDocument;
     readonly site: UseSite;
 }
@@ -68,7 +69,7 @@ export interface BindingUse {
  */
 export interface PendingUse {
     readonly binding: Binding;
-    readonly part: ParameterExpansionPart;
+    readonly part: Node;
     readonly doc: SourceDocument;
     readonly indexes: readonly number[];
 }

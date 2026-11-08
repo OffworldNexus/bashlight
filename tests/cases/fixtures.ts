@@ -9,6 +9,7 @@
 import { createBashlight } from "../../src/bashlight.ts";
 import type { Outcome } from "../../src/outcome.ts";
 import { MemoryFileSystem } from "../../src/project/index.ts";
+import type { Rule } from "../../src/rules/rule.ts";
 
 export type Fixtures = Readonly<Record<string, string | null>>;
 
@@ -126,19 +127,26 @@ export interface RunOptions {
     readonly cwd?: string;
     readonly env?: Readonly<Record<string, string>>;
     readonly files?: Fixtures;
+    readonly rules?: readonly Rule[];
 }
 
 export const DEFAULT_ENV = { HOME: "/home/user", PATH: "/usr/bin:/bin" };
 
-export function rewrite(command: string, options: RunOptions = {}): Outcome {
+/** Runs a command through the real pipeline over a `MemoryFileSystem`. */
+export function runCommand(command: string, options: RunOptions = {}): Outcome {
     const processor = createBashlight({
         fileSystem: new MemoryFileSystem(options.files ?? {}),
+        ...(options.rules === undefined ? {} : { rules: options.rules }),
     });
     return processor.process({
         command,
         cwd: options.cwd ?? "/w",
         env: options.env ?? DEFAULT_ENV,
     });
+}
+
+export function rewrite(command: string, options: RunOptions = {}): Outcome {
+    return runCommand(command, options);
 }
 
 /** The rewritten command, or `undefined` when it was kept/blocked. */

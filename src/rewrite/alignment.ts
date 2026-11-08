@@ -31,8 +31,6 @@ export interface Alignment {
     readonly anchors: readonly number[];
     /** Original argument index → position in the replacement argv. */
     readonly repOfAnchor: ReadonlyMap<number, number>;
-    /** Original argument indices not referenced by any `arg`. */
-    readonly deleted: readonly number[];
     readonly gaps: readonly Gap[];
 }
 
@@ -82,19 +80,11 @@ export function align(
     if (unordered) {
         return { ok: false, unordered: true, reason: "replacement args are reordered" };
     }
-    const anchorSet = new Set(anchors);
-    const deleted: number[] = [];
-    for (let index = 0; index < args.length; index += 1) {
-        if (!anchorSet.has(index)) {
-            deleted.push(index);
-        }
-    }
     return {
         ok: true,
         alignment: {
             anchors,
             repOfAnchor,
-            deleted,
             gaps: buildGaps(reps, anchors, repOfAnchor, args.length),
         },
     };

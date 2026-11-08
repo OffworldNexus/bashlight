@@ -15,10 +15,12 @@ import type { ScriptInspector } from "../project/script-inspector.ts";
 import type { RuleContext } from "../rules/rule.ts";
 import type { Decision, RuleEngine } from "../rules/rule-engine.ts";
 import { isSubmitted, toCommandCall } from "./call-builder.ts";
-import type { RewriteTarget, RewrittenTarget } from "./rewriter.ts";
+import { buildExpected } from "./expected.ts";
+import type { RewrittenTarget } from "./rewriter.ts";
 import { Rewriter } from "./rewriter.ts";
 import { ShellQuoter } from "./shell-quoter.ts";
-import { type ExpectedInvocation, validate } from "./validator.ts";
+import { groupTargets } from "./targets.ts";
+import { validate } from "./validator.ts";
 
 export interface Inspectors {
     readonly project: ProjectInspector;
@@ -31,11 +33,10 @@ export interface ProcessorDependencies {
     readonly rewriter: Rewriter;
     /** Fresh inspectors for one request; they memoize per request. */
     readonly inspectors: () => Inspectors;
+    readonly quoter: ShellQuoter;
 }
 
 export class CommandProcessorImpl implements CommandProcessor {
-    private readonly quoter = new ShellQuoter();
-
     constructor(private readonly dependencies: ProcessorDependencies) {}
 
     process(request: ProcessRequest): Outcome {
@@ -97,7 +98,7 @@ export class CommandProcessorImpl implements CommandProcessor {
             };
         }
 
-        const grouped = this.group(interpretation.invocations, decisions);
+        const grouped = groupTargets(interpretation.invocations, decisions);
         const plan = this.dependencies.rewriter.plan({
             interpretation,
             targets: grouped.targets,
@@ -106,7 +107,11 @@ export class CommandProcessorImpl implements CommandProcessor {
         if (plan.rewritten.length === 0) {
             return unchanged(nothingReason(plan) ?? grouped.conflicts[0]);
         }
-        const expected = buildExpected(interpretation, plan, grouped.ownerOf);
+        const expected = buildExpected({
+            interpretation,
+            plan,
+            ownerOf: grouped.ownerOf,
+        });
         const rewritten = this.dependencies.interpreter.interpret(
             plan.command,
             initial,
@@ -128,60 +133,6 @@ export class CommandProcessorImpl implements CommandProcessor {
         };
     }
 
-    private group(
-        invocations: readonly Invocation[],
-        decisions: ReadonlyMap<Invocation, Decision>,
-    ): {
-        targets: RewriteTarget[];
-        ownerOf: Map<Invocation, number>;
-        conflicts: string[];
-    } {
-        const nodes = new Map<Invocation["command"], Invocation[]>();
-        for (const invocation of invocations) {
-            if (!isSubmitted(invocation) || !decisions.has(invocation)) {
-                continue;
-            }
-            const list = nodes.get(invocation.command);
-            if (list === undefined) {
-                nodes.set(invocation.command, [invocation]);
-            } else {
-                list.push(invocation);
-            }
-        }
-        const targets: RewriteTarget[] = [];
-        const ownerOf = new Map<Invocation, number>();
-        const conflicts: string[] = [];
-        for (const group of nodes.values()) {
-            const resolved = group.map((invocation) => ({
-                invocation,
-                decision: decisions.get(invocation) as Decision,
-            }));
-            const first = resolved[0];
-            if (first === undefined) {
-                continue;
-            }
-            const reference = first.decision;
-            if (reference.kind !== "replace") {
-                continue;
-            }
-            const consistent = resolved.every(
-                (item) =>
-                    item.decision.kind === "replace" &&
-                    sameDecision(reference, item.decision, item.invocation),
-            );
-            if (!consistent) {
-                conflicts.push("a command that runs twice would change differently");
-                continue;
-            }
-            const index = targets.length;
-            targets.push({ invocation: first.invocation, decision: reference });
-            for (const item of resolved) {
-                ownerOf.set(item.invocation, index);
-            }
-        }
-        return { targets, ownerOf, conflicts };
-    }
-
     private change(target: RewrittenTarget): Change {
         const ruleIds: string[] = [];
         const reasons: string[] = [];
@@ -200,7 +151,9 @@ export class CommandProcessorImpl implements CommandProcessor {
     private display(values: readonly (string | undefined)[]): string {
         return values
             .map((value) =>
-                value === undefined ? "<unknown>" : this.quoter.quote(value),
+                value === undefined
+                    ? "<unknown>"
+                    : this.dependencies.quoter.quote(value),
             )
             .join(" ");
     }
@@ -213,108 +166,6 @@ function contextFor(invocation: Invocation, inspectors: Inspectors): RuleContext
         project: inspectors.project,
         scripts: inspectors.scripts,
     };
-}
-
-function sameDecision(
-    reference: Extract<Decision, { kind: "replace" }>,
-    other: Decision,
-    invocation: Invocation,
-): boolean {
-    if (other.kind !== "replace") {
-        return false;
-    }
-    if (!sameRecord(reference.env, other.env)) {
-        return false;
-    }
-    const left = resolve(reference, invocation);
-    const right = resolve(other, invocation);
-    return left.length === right.length && left.every((value, i) => value === right[i]);
-}
-
-function resolve(
-    decision: Extract<Decision, { kind: "replace" }>,
-    invocation: Invocation,
-): (string | undefined)[] {
-    return decision.argv.map((replacement) =>
-        replacement.kind === "text"
-            ? replacement.value
-            : invocation.argv[replacement.index]?.value,
-    );
-}
-
-function sameRecord(
-    left: Readonly<Record<string, string>>,
-    right: Readonly<Record<string, string>>,
-): boolean {
-    const leftKeys = Object.keys(left);
-    const rightKeys = Object.keys(right);
-    return (
-        leftKeys.length === rightKeys.length &&
-        leftKeys.every((key) => left[key] === right[key])
-    );
-}
-
-function buildExpected(
-    interpretation: {
-        readonly invocations: readonly Invocation[];
-    },
-    plan: {
-        readonly rewritten: readonly RewrittenTarget[];
-        readonly overrides: ReadonlyMap<
-            Invocation,
-            ReadonlyMap<number, string | undefined>
-        >;
-        readonly givenUp: readonly { readonly target: RewriteTarget }[];
-    },
-    ownerOf: ReadonlyMap<Invocation, number>,
-): ExpectedInvocation[] {
-    const rewritten = new Map<number, RewrittenTarget>();
-    for (const target of plan.rewritten) {
-        const index = ownerOf.get(target.target.invocation);
-        if (index !== undefined) {
-            rewritten.set(index, target);
-        }
-    }
-    const expected: ExpectedInvocation[] = [];
-    for (const invocation of interpretation.invocations) {
-        const index = ownerOf.get(invocation);
-        const target = index === undefined ? undefined : rewritten.get(index);
-        if (target !== undefined) {
-            expected.push({
-                kind: invocation.kind,
-                argv: target.values,
-                cwd: invocation.context.cwd,
-                host: invocation.context.host,
-                env: target.env,
-            });
-            continue;
-        }
-        expected.push({
-            kind: invocation.kind,
-            argv: withOverrides(invocation, plan.overrides.get(invocation)),
-            cwd: invocation.context.cwd,
-            host: invocation.context.host,
-            env: {},
-        });
-    }
-    return expected;
-}
-
-function withOverrides(
-    invocation: Invocation,
-    overrides: ReadonlyMap<number, string | undefined> | undefined,
-): readonly (string | undefined)[] {
-    const values = invocation.argv.map((arg) => arg.value);
-    if (overrides === undefined) {
-        return values;
-    }
-    for (const [fullIndex, value] of overrides) {
-        const index = fullIndex - invocation.offset;
-        if (index >= 0 && index < values.length) {
-            values[index] = value;
-        }
-    }
-    return values;
 }
 
 function nothingReason(plan: {
