@@ -1,7 +1,10 @@
 node_modules/
 dist/
+site/
 *.log
 .DS_Store
 .idea/
 /tmp/
 corpus/raw/
+bench/runs/
+bench/.cache/

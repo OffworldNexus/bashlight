@@ -1,0 +1,82 @@
+/*
+ * bashlight's palette. `primary` and `accent` are `custom` in
+ * `zensical.toml`, so these variables are the whole theme.
+ *
+ * Two colours do the branding: `--bashlight-primary`, a terminal green, and
+ * `--bashlight-accent`, a steel blue for links. Everything else is the
+ * neutral ink/paper pair the text needs.
+ */
+
+:root {
+    /* Light scheme. */
+    --bashlight-primary: #14532d;
+    --bashlight-accent: #1d4ed8;
+    --bashlight-ink: #1a1f1c;
+    --bashlight-paper: #f6f9f7;
+    --bashlight-surface: #ffffff;
+    --bashlight-muted: #5b6b62;
+    --bashlight-primary-ink: #ffffff;
+    --bashlight-accent-ink: #ffffff;
+}
+
+/* Dark scheme. */
+[data-md-color-scheme="slate"] {
+    --bashlight-primary: #166534;
+    --bashlight-accent: #60a5fa;
+    --bashlight-ink: #e8efe9;
+    --bashlight-paper: #0f1512;
+    --bashlight-surface: #161d19;
+    --bashlight-muted: #a3b1a8;
+    --bashlight-primary-ink: #ffffff;
+    --bashlight-accent-ink: #08101f;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-md-color-scheme]) {
+        --bashlight-primary: #166534;
+        --bashlight-accent: #60a5fa;
+        --bashlight-ink: #e8efe9;
+        --bashlight-paper: #0f1512;
+        --bashlight-surface: #161d19;
+        --bashlight-muted: #a3b1a8;
+        --bashlight-primary-ink: #ffffff;
+        --bashlight-accent-ink: #08101f;
+    }
+}
+
+/* Theme mapping, in the variable names the theme reads. */
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
+    --md-primary-fg-color: var(--bashlight-primary);
+    --md-primary-fg-color--light: var(--bashlight-primary);
+    --md-primary-fg-color--dark: var(--bashlight-primary);
+    --md-primary-bg-color: var(--bashlight-primary-ink);
+
+    --md-accent-fg-color: var(--bashlight-accent);
+    --md-accent-bg-color: var(--bashlight-accent-ink);
+
+    --md-default-bg-color: var(--bashlight-paper);
+    --md-default-fg-color: var(--bashlight-ink);
+    --md-default-fg-color--light: var(--bashlight-muted);
+    --md-code-bg-color: var(--bashlight-surface);
+    --md-code-fg-color: var(--bashlight-ink);
+    --md-typeset-color: var(--bashlight-ink);
+    --md-typeset-a-color: var(--bashlight-accent);
+    --md-footer-bg-color: var(--bashlight-primary);
+    --md-footer-fg-color: var(--bashlight-primary-ink);
+}
+
+/* On a phone a wide table is wider than the viewport; let it scroll in place
+   rather than stretching the whole page. */
+@media screen and (max-width: 44.9375em) {
+    .md-typeset__table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+        padding-bottom: 0.2rem;
+    }
+
+    .md-typeset__table table:not([class]) {
+        min-width: max-content;
+    }
+}

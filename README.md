@@ -1,137 +1,92 @@
 # bashlight
 
-bashlight sits between an LLM agent and the shell. When the agent runs a bash command,
-bashlight parses it, **statically** pre-interprets it (nothing is executed), finds every
-command that will run, and rewrites the ones that do not match the project's conventions
-— `pip install requests` in a Poetry project becomes `poetry add requests`. The
-rewritten command is what actually runs; the agent keeps seeing its own command in the
-history.
+**The agent thinks it ran its command. bashlight made it run the right one.**
 
-bashlight fails open: unparseable input, unknown values or any internal error leave the
-command untouched. Only an explicit `block` verdict stops a command.
+bashlight gaslights coding agents, starting with bash. It sits between an LLM agent and
+the shell and silently rewrites the bash the agent runs to match the project's
+conventions. When an agent runs `pip install requests` in a Poetry project, bashlight
+turns the call into `poetry add requests` and lets the agent believe that is what it did
+— no instructions in the prompt, no denials, no retries. It never executes anything to
+decide: it parses the command, pre-interprets it statically (variables, `cd`, `bash -c`,
+ssh, wrappers…), runs a set of rules on every command that would execute, edits the
+source minimally, and re-interprets the result to prove the edit did exactly what it
+meant. When anything is uncertain, it fails open and the original command runs
+untouched.
 
-## Enabling it
+## Before → after
 
-**Project-local** (already configured in this repo): `.opencode/plugins/bashlight.ts`
-only re-exports the plugin.
+| Project | The agent runs                           | What runs                                     |
+| ------- | ---------------------------------------- | --------------------------------------------- |
+| Poetry  | `pip install -U requests`                | `poetry add requests@latest`                  |
+| Poetry  | `P="python"; $P main.py`                 | `P="poetry run python"; $P main.py`           |
+| uv      | `cd api && python main.py`               | `cd api && uv run python main.py`             |
+| pnpm    | `npm i -D vitest`                        | `pnpm add -D vitest`                          |
+| Poetry  | `./manage.py migrate`                    | `poetry run ./manage.py migrate`              |
+| Poetry  | `bash -c 'python manage.py check'`       | `bash -c 'poetry run python manage.py check'` |
+| uv      | `poetry run python manage.py check`      | `uv run python manage.py check`               |
+| —       | `pip install requests` outside a project | _blocked_, pointing at PEP 723 scripts        |
 
-```ts
-export { default } from "../../src/opencode/plugin.ts";
-```
+## Install
 
-**Globally**, create `~/.config/opencode/plugins/bashlight.ts` containing the absolute
-path of the plugin entry point:
+1. Clone it and install the one runtime dependency:
 
-```ts
-export { default } from "/absolute/path/to/bashlight/src/opencode/plugin.ts";
-```
+    ```console
+    $ git clone https://github.com/OffworldNexus/bashlight ~/dev/bashlight
+    $ cd ~/dev/bashlight && bun install
+    ```
 
-Alternatively, list `bashlight` in the `plugins` array of
-`~/.config/opencode/opencode.json`.
+2. Point OpenCode at the plugin. Drop a one-line file into the project (or into
+   `~/.config/opencode/plugins/` to enable it everywhere), with the absolute path to the
+   checkout:
 
-## Plugin options
+    ```ts title=".opencode/plugins/bashlight.ts"
+    export { default } from "/home/user/dev/bashlight/src/opencode/plugin.ts";
+    ```
 
-Passed through OpenCode's `plugins: [{ package, options }]`:
+3. Check it is live:
 
-- `auditLog`: a file path, or `false` to disable auditing. Defaults to
-  `$XDG_DATA_HOME/bashlight/audit.jsonl`, falling back to
-  `~/.local/share/bashlight/audit.jsonl`.
-- `disabledRules`: rule ids the core should not apply, for example `["node-manager"]`.
+    ```console
+    $ bun bin/bashlight doctor
+    ```
 
-## Checking that it works
+## Keep an eye on it
 
-`bashlight` ships a small CLI so you can see exactly what the plugin does. Run it with
-`bun bin/bashlight` (or `bun run cli` from the repo root). Every command takes
-`--log PATH` to point at a non-default audit log.
+bashlight hides itself from the agent, not from you. A small CLI reads the audit log it
+writes and dry-runs the pipeline:
 
-### `bashlight doctor`
+- `watch` — follow the audit log in real time, one block per rewrite.
+- `stats` — totals, per-rule counts and the most common rewrites over a window.
+- `explain` — dry-run one command and show exactly what would run.
+- `doctor` — check the runtime, the plugin and the pipeline end to end.
 
-Diagnoses the installation: runtime versions, plugin discoverability, the audit log and
-a live end-to-end self-test. `✗` fails (exit code 1), `⚠` warns, `✓` passes.
-
-```
-$ bun bin/bashlight doctor
-✓ bun 1.3.14
-✓ opencode opencode v2.2.5
-✓ plugin discoverability (project: /repo/.opencode/plugins/bashlight.ts)
-✓ audit log /home/u/.local/share/bashlight/audit.jsonl (0 bytes, no entries yet)
-⚠ audit log is idle — no shell call seen recently — is the plugin loaded? check ~/.local/share/opencode/log/ for 'failed to load plugin'
-✓ self-test: pip install requests → poetry add requests
-```
-
-### `bashlight explain <command…>`
-
-Dry-runs a command through the real pipeline with the real file system and the current
-environment, without executing anything. The command is one quoted argument, the
-remaining arguments joined with spaces, or `-` to read it from stdin.
-
-```
-$ bun bin/bashlight explain 'pip install requests' --cwd /path/to/poetry/project
-rewritten:
-  - pip install requests
-  + poetry add requests
-changes:
-  - rules: pip-to-manager  reasons: install with the project manager
-      pip install requests → poetry add requests
-```
-
-```
-$ bun bin/bashlight explain 'pip install requests' --cwd /tmp
-blocked:
-  Installing packages with pip outside a project is disabled. Use a PEP 723 script …
-```
-
-### `bashlight watch`
-
-Prints the current tail (the last 20 entries, or those inside `--since`) and then
-follows the log, one block per entry. `--all` also shows unchanged commands (hidden by
-default); `--no-color` disables colour; Ctrl-C exits.
-
-```
+```console
 $ bun bin/bashlight watch --since 10m
-2026-11-08 15:12:04  ses_1234  ~/proj
+2026-11-08 15:12:04  ses_1234  ~/dev/shop
   - pip install requests
   + poetry add requests
   rules: pip-to-manager  reasons: install with the project manager
 ```
 
-### `bashlight stats`
+## Documentation
 
-Summarises the log (default window: 7 days): totals, per-rule counts, per-day outcomes,
-the most common rewrite pairs and the busiest working directories. `--json` prints a
-machine-readable object.
+**Read the docs →** <https://offworldnexus.github.io/bashlight/>
 
-```
-$ bun bin/bashlight stats --since 7d
-Audit log: /home/u/.local/share/bashlight/audit.jsonl
-Window: last 7d
+[Getting started](https://offworldnexus.github.io/bashlight/getting-started/) ·
+[How it works](https://offworldnexus.github.io/bashlight/how-it-works/) ·
+[Rules](https://offworldnexus.github.io/bashlight/rules/) ·
+[Monitoring](https://offworldnexus.github.io/bashlight/monitoring/)
 
-Entries:      42
-Rewritten:    31 (74%)
-Blocked:      2
-Unchanged:    9
+## Development
 
-Rules:
-    18  pip-to-manager
-     7  python-runner
-     4  node-manager
-
-Top rewrites:
-    12  pip install → poetry add
-     3  npm install → pnpm add
-
-Top working directories:
-    25  ~/proj
-     9  ~/other
+```console
+$ make clean   # prettier + eslint + tsc
+$ bun test     # the test suite
 ```
 
-## The audit log
+`tests/cases/` holds hand-written end-to-end examples; `corpus/` is an optional, private
+git submodule of anonymized real commands. The corpus tests are skipped when the
+submodule is absent, as on CI, so `bun test` works on a bare clone.
 
-The plugin appends one JSON object per line to the audit log (default
-`$XDG_DATA_HOME/bashlight/audit.jsonl`, else `~/.local/share/bashlight/audit.jsonl`).
-Each line records the session, call id, cwd, the original and rewritten commands, the
-outcome and the rule ids and reasons. `bashlight watch` and `bashlight stats` read it;
-malformed lines are skipped.
+## License
 
-The log is append-only and **grows without bound** — rotate or truncate it when it gets
-large (for example with `logrotate`).
+Apache 2.0 — see [`LICENSE`](LICENSE).
