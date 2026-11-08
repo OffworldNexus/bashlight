@@ -3,9 +3,11 @@ import { describe, expect, test } from "bun:test";
 import {
     axisTicks,
     bandLayout,
+    deltaScale,
     escapeXml,
     niceMax,
     renderChart,
+    renderDeltaChart,
     scaleValue,
 } from "../../bench/lib/chart.ts";
 
@@ -49,6 +51,20 @@ describe("scaleValue", () => {
     });
 });
 
+describe("deltaScale", () => {
+    test("keeps the sign around a shared zero and clamps to the half width", () => {
+        expect(deltaScale(50, 100, 200)).toBe(100);
+        expect(deltaScale(-50, 100, 200)).toBe(-100);
+        expect(deltaScale(150, 100, 200)).toBe(200);
+        expect(deltaScale(-150, 100, 200)).toBe(-200);
+    });
+
+    test("returns zero for an invalid value or a zero maximum", () => {
+        expect(deltaScale(Number.NaN, 100, 200)).toBe(0);
+        expect(deltaScale(50, 0, 200)).toBe(0);
+    });
+});
+
 describe("bandLayout", () => {
     test("splits the width into equal category bands with grouped bars", () => {
         const layout = bandLayout(400, 2, 2, 0.5);
@@ -89,7 +105,7 @@ describe("renderChart", () => {
                     {
                         label: "m1",
                         values: [
-                            { value: 50, min: 0, max: 100 },
+                            { value: 33, min: 0, max: 100 },
                             { value: 100, min: 100, max: 100 },
                         ],
                     },
@@ -110,8 +126,96 @@ describe("renderChart", () => {
         expect(svg).toContain("100%");
     });
 
+    test("labels every bar with its formatted value", () => {
+        const svg = renderChart(spec);
+        // The 33% bar carries its own value label, distinct from the tick.
+        expect(svg).toContain(">33%</text>");
+    });
+
+    test("puts the y-axis title beside the axis, rotated", () => {
+        const svg = renderChart(spec);
+        expect(svg).toContain('transform="rotate(-90');
+        expect(svg).toContain(">Success</text>");
+    });
+
     test("draws min–max whiskers when a bar carries them", () => {
         const svg = renderChart(spec);
         expect(svg).toContain('stroke-width="1.5"');
+    });
+
+    test("omits whiskers for a bar without a spread", () => {
+        const withoutWhiskers = {
+            ...spec,
+            panels: [
+                {
+                    yLabel: "Success",
+                    format: (value: number) => `${value.toFixed(0)}%`,
+                    categories: [{ label: "m1", values: [{ value: 33 }] }],
+                },
+            ],
+        };
+        expect(renderChart(withoutWhiskers)).not.toContain('stroke-width="1.5"');
+    });
+});
+
+describe("renderDeltaChart", () => {
+    const spec = {
+        title: "Change with bashlight",
+        metrics: ["cost", "success"],
+        categories: [
+            {
+                label: "m1",
+                bars: [
+                    {
+                        value: -28,
+                        label: "−28%",
+                        tone: "better" as const,
+                        available: true,
+                    },
+                    {
+                        value: 12,
+                        label: "+12 pp",
+                        tone: "better" as const,
+                        available: true,
+                    },
+                ],
+            },
+            {
+                label: "m2",
+                bars: [
+                    {
+                        value: 40,
+                        label: "+40%",
+                        tone: "worse" as const,
+                        available: true,
+                    },
+                    {
+                        value: Number.NaN,
+                        label: "n/a",
+                        tone: "same" as const,
+                        available: false,
+                    },
+                ],
+            },
+        ],
+    };
+
+    test("renders bars around a zero line with better/worse colours", () => {
+        const svg = renderDeltaChart(spec);
+        expect(svg).toContain("Change with bashlight");
+        expect(svg).toContain(">cost<");
+        expect(svg).toContain(">success<");
+        expect(svg).toContain("−28%");
+        expect(svg).toContain("+12 pp");
+        expect(svg).toContain("#16a34a");
+        expect(svg).toContain("#dc2626");
+        expect(svg).toContain("better");
+        expect(svg).toContain("worse");
+    });
+
+    test("shows n/a without a bar when the baseline is zero", () => {
+        const svg = renderDeltaChart(spec);
+        expect(svg).toContain("n/a");
+        expect(svg).toContain(">n/a</text>");
     });
 });

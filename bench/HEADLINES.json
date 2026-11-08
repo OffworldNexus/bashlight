@@ -1,0 +1,65 @@
+{
+    "matchedCells": 1,
+    "runs": 2,
+    "costTime": {
+        "tier": "flash",
+        "models": [
+            {
+                "model": "openrouter/deepseek/deepseek-v4.1-flash",
+                "display": "deepseek-v4.1-flash",
+                "tier": "flash",
+                "cells": 1,
+                "runsWithout": 1,
+                "runsWith": 1,
+                "cost": {
+                    "median": 47.918583791589384,
+                    "min": 47.918583791589384,
+                    "max": 47.918583791589384,
+                    "samples": 1,
+                    "unit": "percent",
+                    "direction": "lower"
+                },
+                "time": {
+                    "median": 38.96362730443448,
+                    "min": 38.96362730443448,
+                    "max": 38.96362730443448,
+                    "samples": 1,
+                    "unit": "percent",
+                    "direction": "lower"
+                },
+                "successWithout": 1,
+                "successWith": 1
+            }
+        ]
+    },
+    "completion": {
+        "models": [
+            {
+                "model": "openrouter/deepseek/deepseek-v4.1-flash",
+                "display": "deepseek-v4.1-flash",
+                "tier": "flash",
+                "cells": 1,
+                "runsWithout": 1,
+                "runsWith": 1,
+                "cost": {
+                    "median": 47.918583791589384,
+                    "min": 47.918583791589384,
+                    "max": 47.918583791589384,
+                    "samples": 1,
+                    "unit": "percent",
+                    "direction": "lower"
+                },
+                "time": {
+                    "median": 38.96362730443448,
+                    "min": 38.96362730443448,
+                    "max": 38.96362730443448,
+                    "samples": 1,
+                    "unit": "percent",
+                    "direction": "lower"
+                },
+                "successWithout": 1,
+                "successWith": 1
+            }
+        ]
+    }
+}

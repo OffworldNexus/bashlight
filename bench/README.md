@@ -10,18 +10,23 @@ results drive the charts on the [benchmark page](../docs/benchmark.md).
 ```
 bench/
   run.ts            matrix runner (bun bench/run.ts)
-  report.ts         results -> RESULTS.md + charts (bun bench/report.ts)
-  charts.ts         SVG chart generation (bun bench/charts.ts)
+  report.ts         results -> RESULTS.md + HEADLINES.json + charts (bun bench/report.ts)
+  charts.ts         SVG headline-chart generation (bun bench/charts.ts)
   tasks.ts          the projects, their prompts and success checkers
   lib/              the harness (pure parsing/aggregation + thin adapters)
   projects/         committed project templates (source and lockfiles only)
   results/          one JSON line per run (committed; small and useful)
   runs/             raw event logs per run (gitignored)
+  charts/           exploratory charts from --all-charts (gitignored)
   .cache/           shared package-manager caches (gitignored)
 ```
 
 Working copies are created fresh under `/tmp/opencode/bench-runs/<run-id>/`, so the
 benchmark never mutates a template and never shares state between runs.
+
+Only **matched cells** are compared: a (project, model) cell counts when it has a
+completed run in _both_ modes, and each cell is weighted once. Unmatched runs are listed
+but never compared.
 
 ## Projects and tasks
 
@@ -45,36 +50,50 @@ bun bench/run.ts --dry-run             # print the matrix, run nothing
 bun bench/run.ts --projects scripts --modes without \
   --models openrouter/deepseek/deepseek-v4.1-flash
 bun bench/run.ts --repeat 3 --jobs 3 --max-cost 5
-bun bench/report.ts                    # newest results -> RESULTS.md + charts
+bun bench/report.ts                    # newest results -> RESULTS.md + HEADLINES.json + charts
 bun bench/report.ts --all              # merge every results file, then render
+bun bench/report.ts --all-charts       # also write the exploratory charts to bench/charts/
 ```
 
 Flags: `--models a,b`, `--modes with,without`, `--projects all|a,b`, `--repeat N`,
 `--jobs N` (parallel runs, default 3), `--timeout SECONDS`, `--max-cost USD`,
-`--dry-run`.
+`--dry-run`. The report takes `--all` (merge all files) and `--all-charts`.
 
 The runner runs up to `--jobs` isolated cells at once. Before starting another it asks a
 cost guard whether `spend + mean(completed) × (in flight + 1)` would cross `--max-cost`,
 so a parallel matrix still respects the cap.
 
-The default models are three cheap, tool-capable models from three families:
-`openrouter/deepseek/deepseek-v4.1-flash`, `openrouter/openai/gpt-5-nano` and
-`openrouter/anthropic/claude-haiku-5.5`.
+## Models and tiers
+
+Models live in `lib/models.ts`, each with a **tier** and a display name:
+
+- `small` — a cheap, fast mini/nano model (`openai/gpt-5-nano`).
+- `flash` — a cheap-but-capable flash model (`deepseek/deepseek-v4.1-flash`,
+  `anthropic/claude-haiku-5.5`).
+
+The cost/time headline covers the `flash` tier; the completion chart lists every model
+smallest first (ordered by output price). To add a model, append an entry with its id,
+display name, tier and `outputPricePerMTok` (keep the price in sync with OpenRouter); an
+unknown model falls back to `flash` and orders last.
 
 ## Metrics
 
 Each run records: success (from the checker), cost, input/output tokens, wall time,
 total shell calls, failed shell calls (non-zero exit or tool error), bashlight rewrites
 and blocks (from the run's audit log), and the time to the last passing test command
-("green"). `bench/report.ts` aggregates them by model × mode and by project × mode.
+("green"). The report aggregates them by cell, model × mode and project × mode,
+equal-weighted over matched cells.
 
 ## Charts
 
-`bench/charts.ts` renders five dependency-free SVGs into `docs/assets/benchmark/`:
-success, cost, wall time and failed shell calls by model, plus a per-project
-success/cost chart. They use a transparent background and mid-contrast colours that read
-on both light and dark pages. The renderer's scale and layout maths live in
-`bench/lib/chart.ts` and are unit-tested.
+`bench/charts.ts` renders two dependency-free headline SVGs into
+`docs/assets/benchmark/`: `headline-cost-time.svg` (flash-class paired median change in
+cost and wall time, with a min–max whisker across cells) and `headline-completion.svg`
+(completion with vs without, models smallest first). `bench/report.ts` also writes
+`bench/HEADLINES.json` with the exact numbers behind both messages. The exploratory
+charts are still buildable, off the docs page, with `--all-charts` (into
+`bench/charts/`). The renderer's scale and layout maths live in `bench/lib/chart.ts` and
+are unit-tested.
 
 ## Isolation
 

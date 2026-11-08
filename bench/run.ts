@@ -17,17 +17,14 @@ import { ProcessRunner } from "./lib/command.ts";
 import { OpenRouterCredentials } from "./lib/credentials.ts";
 import { NodeBenchFileSystem } from "./lib/fs.ts";
 import { Isolation } from "./lib/isolation.ts";
+import { DEFAULT_MODEL_IDS } from "./lib/models.ts";
 import { OpenCodeRunner } from "./lib/opencode-runner.ts";
 import { ResultsStore } from "./lib/results-store.ts";
 import { TemplatePreparer } from "./lib/template.ts";
 import { TASKS } from "./tasks.ts";
 
-/** Cheap, tool-capable models from three different families. */
-export const DEFAULT_MODELS = [
-    "openrouter/deepseek/deepseek-v4.1-flash",
-    "openrouter/openai/gpt-5-nano",
-    "openrouter/anthropic/claude-haiku-5.5",
-] as const;
+/** Re-exported so callers can show the default model set. */
+export const DEFAULT_MODELS = DEFAULT_MODEL_IDS;
 
 async function main(): Promise<number> {
     const benchDir = import.meta.dirname;
