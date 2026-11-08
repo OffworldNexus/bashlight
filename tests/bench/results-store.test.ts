@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import type { BenchFileSystem } from "../../bench/lib/fs.ts";
-import { parseResults, ResultsStore } from "../../bench/lib/results-store.ts";
+import {
+    isResultsFileName,
+    parseResults,
+    ResultsStore,
+} from "../../bench/lib/results-store.ts";
 import type { RunRecord } from "../../bench/lib/types.ts";
 
 function record(runId: string): RunRecord {
@@ -65,6 +69,15 @@ describe("parseResults", () => {
             JSON.stringify(record("c")),
         ].join("\n");
         expect(parseResults(text).map((item) => item.runId)).toEqual(["a", "c"]);
+    });
+});
+
+describe("isResultsFileName", () => {
+    test("accepts the runner's timestamped files and rejects archives", () => {
+        expect(isResultsFileName("2026-11-08T18-33-21-067Z.jsonl")).toBe(true);
+        expect(isResultsFileName("v1-2026-11-08.jsonl")).toBe(false);
+        expect(isResultsFileName("results.jsonl")).toBe(false);
+        expect(isResultsFileName("2026-11-08T18-33-21-067Z.txt")).toBe(false);
     });
 });
 

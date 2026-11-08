@@ -21,6 +21,8 @@ const WHISKER_COLOR = "#6b7280";
 const BETTER_COLOR = "#16a34a";
 const WORSE_COLOR = "#dc2626";
 const NEUTRAL_COLOR = "#8b8b8b";
+/** A single neutral colour for delta charts that carry no better/worse meaning. */
+const NEUTRAL_BAR_COLOR = "#64748b";
 const FONT = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 
 /** Nice-axis and layout constants for the grouped-bar chart. */
@@ -29,6 +31,11 @@ const DEFAULT_WIDTH = 760;
 const DEFAULT_PANEL_HEIGHT = 300;
 const HEADER_HEIGHT = 46;
 const TICK_COUNT = 5;
+/**
+ * Vertical space reserved above the tallest bar (or whisker) so its value
+ * label always has room and never lands on the bar or another label.
+ */
+const LABEL_ROOM = 18;
 
 /** Layout constants for the diverging delta chart. */
 const DELTA_MARGIN = { left: 28, right: 24, top: 56, bottom: 40 } as const;
@@ -61,6 +68,8 @@ export interface ChartBar {
 /** A group on the x axis, with one bar per series in order. */
 export interface ChartCategory {
     readonly label: string;
+    /** A small line under the category label, e.g. `n=5/4`. */
+    readonly note?: string;
     readonly values: readonly ChartBar[];
 }
 
@@ -243,7 +252,10 @@ function renderPanel(
     const top = offsetY + MARGIN.top;
     const baseline = top + plotHeight;
     const max = niceMax(panelMax(panel));
-    const scale = (value: number) => scaleValue(value, max, plotHeight);
+    // Bars stop short of the panel top so every value label sits in the empty
+    // band above them, never on a bar, a whisker or another label.
+    const scale = (value: number) =>
+        scaleValue(value, max, Math.max(1, plotHeight - LABEL_ROOM));
     const layout = bandLayout(plotWidth, panel.categories.length, spec.series.length);
     const parts: string[] = [`<g>`];
     if (panel.title !== undefined) {
@@ -288,9 +300,7 @@ function renderPanel(
             );
             // Whiskers only exist with at least two samples; they span min→max
             // around the mean with a cap on both ends.
-            let hasWhisker = false;
             if (bar.min !== undefined && bar.max !== undefined) {
-                hasWhisker = true;
                 const whiskerTop = baseline - scale(bar.max);
                 const whiskerBottom = baseline - scale(bar.min);
                 const center = barX + inner / 2;
@@ -300,25 +310,24 @@ function renderPanel(
                     `<line x1="${(center - 5).toFixed(2)}" y1="${whiskerBottom.toFixed(2)}" x2="${(center + 5).toFixed(2)}" y2="${whiskerBottom.toFixed(2)}" stroke="${WHISKER_COLOR}" stroke-width="1.5" />`,
                 );
             }
-            // The value label sits above the whisker when present, otherwise
-            // above the bar. When that would leave the panel it is clamped to
-            // the top; it turns white only when it lands on the bar, and stays
-            // grey over the background.
+            // The value label sits in the reserved band above the bar (or its
+            // whisker), in the series colour: legible over the background and
+            // never on top of a bar or another label.
             const labelValue = bar.max === undefined ? bar.value : bar.max;
-            const above = baseline - scale(labelValue) - 5;
-            const clamped = above < top;
-            const labelY = clamped ? top + 10 : above;
-            const labelColor = clamped && !hasWhisker ? "#ffffff" : TEXT_COLOR;
+            const labelY = baseline - scale(labelValue) - 5;
             parts.push(
                 text(barX + inner / 2, labelY, panel.format(bar.value), {
                     size: 10,
-                    color: labelColor,
+                    color,
                 }),
             );
         });
         const labelX =
             MARGIN.left + (layout.groups[categoryIndex] ?? 0) + layout.groupWidth / 2;
         parts.push(text(labelX, baseline + 20, category.label, { size: 12 }));
+        if (category.note !== undefined) {
+            parts.push(text(labelX, baseline + 33, category.note, { size: 10 }));
+        }
     });
     parts.push(`</g>`);
     return parts.join("");
@@ -372,6 +381,13 @@ export interface DeltaCategory {
     readonly bars: readonly DeltaBar[];
 }
 
+/** A shaded band around zero, used to mark the noise level. */
+export interface DeltaBand {
+    /** The half-width of the band, in the metric's own units. */
+    readonly value: number;
+    readonly label?: string;
+}
+
 export interface DeltaChartSpec {
     readonly title: string;
     /** A small line under the title, e.g. the matched-cell summary. */
@@ -379,6 +395,13 @@ export interface DeltaChartSpec {
     /** Row labels, e.g. `cost`, `wall time`, `failed shells`, `success`. */
     readonly metrics: readonly string[];
     readonly categories: readonly DeltaCategory[];
+    /**
+     * Draw every bar in one neutral colour, with no better/worse meaning. Use
+     * it when the change is within noise and a green/red reading would
+     * overstate it.
+     */
+    readonly neutral?: boolean;
+    readonly band?: DeltaBand;
     readonly width?: number;
     readonly rowHeight?: number;
 }
@@ -398,7 +421,10 @@ function deltaMaxAbs(spec: DeltaChartSpec): number {
     return Math.min(niceMax(max), DELTA_AXIS_CAP);
 }
 
-function deltaColor(bar: DeltaBar): string {
+function deltaColor(bar: DeltaBar, neutral: boolean): string {
+    if (neutral) {
+        return bar.available ? NEUTRAL_BAR_COLOR : NEUTRAL_COLOR;
+    }
     if (!bar.available) {
         return NEUTRAL_COLOR;
     }
@@ -459,9 +485,28 @@ export function renderDeltaChart(spec: DeltaChartSpec): string {
                       size: 11,
                   }),
               ]),
-        swatch(width - 190, 20, BETTER_COLOR, "better"),
-        swatch(width - 108, 20, WORSE_COLOR, "worse"),
+        ...(spec.neutral === true
+            ? [swatch(width - 190, 20, NEUTRAL_BAR_COLOR, "median change")]
+            : [
+                  swatch(width - 190, 20, BETTER_COLOR, "better"),
+                  swatch(width - 108, 20, WORSE_COLOR, "worse"),
+              ]),
     ];
+    // The noise band sits behind everything, spanning the plot height.
+    if (spec.band !== undefined) {
+        const bandPx = Math.abs(deltaScale(spec.band.value, maxAbs, extent));
+        parts.push(
+            `<rect x="${(center - bandPx).toFixed(2)}" y="${plotTop}" width="${(bandPx * 2).toFixed(2)}" height="${plotHeight}" fill="${GRID_COLOR}" fill-opacity="0.14" />`,
+        );
+        if (spec.band.label !== undefined) {
+            parts.push(
+                text(center, plotTop + 12, spec.band.label, {
+                    size: 10,
+                    color: TEXT_COLOR,
+                }),
+            );
+        }
+    }
     // Faint grid lines at the half and full ticks.
     for (const tick of [-maxAbs, -maxAbs / 2, maxAbs / 2, maxAbs]) {
         const x = center + deltaScale(tick, maxAbs, extent);
@@ -496,7 +541,7 @@ export function renderDeltaChart(spec: DeltaChartSpec): string {
             parts.push(
                 text(x0 - 10, rowCenter + 4, label, { anchor: "end", size: 11 }),
             );
-            const color = deltaColor(bar);
+            const color = deltaColor(bar, spec.neutral === true);
             if (!bar.available || !Number.isFinite(bar.value)) {
                 parts.push(
                     text(center + 6, rowCenter + 4, bar.label, {
@@ -512,7 +557,7 @@ export function renderDeltaChart(spec: DeltaChartSpec): string {
                     `<rect x="${barX.toFixed(2)}" y="${(rowCenter - barHeight / 2).toFixed(2)}" width="${Math.abs(pixels).toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2" fill="${color}" />`,
                 );
                 // Paired min–max whisker across cells, when there is a spread.
-                let far = pixels;
+                let edge = pixels;
                 if (bar.min !== undefined && bar.max !== undefined) {
                     const minPx = deltaScale(bar.min, maxAbs, extent);
                     const maxPx = deltaScale(bar.max, maxAbs, extent);
@@ -523,14 +568,17 @@ export function renderDeltaChart(spec: DeltaChartSpec): string {
                         `<line x1="${left.toFixed(2)}" y1="${(rowCenter - 5).toFixed(2)}" x2="${left.toFixed(2)}" y2="${(rowCenter + 5).toFixed(2)}" stroke="${WHISKER_COLOR}" stroke-width="1.5" />`,
                         `<line x1="${right.toFixed(2)}" y1="${(rowCenter - 5).toFixed(2)}" x2="${right.toFixed(2)}" y2="${(rowCenter + 5).toFixed(2)}" stroke="${WHISKER_COLOR}" stroke-width="1.5" />`,
                     );
-                    far = Math.abs(minPx) > Math.abs(maxPx) ? minPx : maxPx;
+                    // The label stays on the bar's own side, just past the
+                    // whisker on that side, so it reads next to its bar.
+                    edge =
+                        pixels >= 0 ? Math.max(minPx, maxPx) : Math.min(minPx, maxPx);
                 }
                 // The label always sits just outside the bar or whisker; the
                 // reserved gutter is wide enough that it never clips.
-                const labelX = far >= 0 ? center + far + 6 : center + far - 6;
+                const labelX = edge >= 0 ? center + edge + 6 : center + edge - 6;
                 parts.push(
                     text(labelX, rowCenter + 4, bar.label, {
-                        anchor: far >= 0 ? "start" : "end",
+                        anchor: edge >= 0 ? "start" : "end",
                         size: 10,
                         color,
                     }),

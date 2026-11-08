@@ -1,61 +1,78 @@
 # Benchmark
 
-Does bashlight help an agent finish its work, or does it only make the transcript look
-tidier? The benchmark in
-[`bench/`](https://github.com/OffworldNexus/bashlight/tree/develop/bench) measures it on
-three small fake projects, each with one realistic task and an objective success check:
+Does bashlight help an agent finish real work, or does it only make the transcript look
+tidier? We ran the same multi-step tasks through OpenCode **with** and **without** the
+plugin and compared them. Two things came out of it:
 
-| Project       | Toolchain     | Task                                                      | Success means                                        |
-| ------------- | ------------- | --------------------------------------------------------- | ---------------------------------------------------- |
-| `poetry-shop` | Poetry/pytest | add `slugify_title()` using python-slugify, with tests    | `poetry run pytest` passes, dependency declared      |
-| `uv-report`   | uv/pytest     | add a `report` CLI command printing a table with tabulate | `uv run pytest` passes, dependency declared          |
-| `pnpm-web`    | pnpm/vitest   | add `formatRelative()` using dayjs, with tests            | `pnpm test` passes, dependency declared, no npm lock |
+- **Smaller models finish more tasks.** gpt-5-nano completed **52%** of the tasks with
+  bashlight against **33%** without (13/25 vs 8/24). On the two tasks where it reached
+  for the wrong Python tooling, it went from **0/9 to 7/10**.
+- **No measurable overhead on flash-class models.** claude-haiku-5.5 and
+  deepseek-v4.1-flash completed every task either way; the median change in cost per run
+  was −4% and −5%, and in wall time −4% and 0% — within the noise of the measurement.
 
-Each task runs headless (`opencode run --format json`) in a fresh copy of the project,
-once **with** the plugin and once **without**, on three cheap models, twice each. Every
-run uses an isolated OpenCode configuration (no MCP servers, no personal instructions,
-no other plugins) so the only difference between the two modes is bashlight.
+150 runs, $1.08 in total. Everything below can be re-derived from
+[`bench/HEADLINES.json`](https://github.com/OffworldNexus/bashlight/blob/develop/bench/HEADLINES.json)
+and
+[`bench/RESULTS.md`](https://github.com/OffworldNexus/bashlight/blob/develop/bench/RESULTS.md).
 
-## Results
+## Smaller models finish more tasks
 
-36 runs, $0.70 in total.
+![Completion rate of gpt-5-nano per task, with and without bashlight](assets/benchmark/headline-completion.svg)
 
-| Model               | Mode    | Success | Input tokens | Output tokens |  Cost | Wall (s) | Failed shell calls | Rewrites |
-| ------------------- | ------- | ------: | -----------: | ------------: | ----: | -------: | -----------------: | -------: |
-| deepseek-v4.1-flash | without |    100% |       29 309 |         4 749 | 0.97¢ |     33.3 |                0.3 |        — |
-| deepseek-v4.1-flash | with    |    100% |       26 923 |         3 428 | 0.73¢ |     26.5 |                0.0 |      0.2 |
-| gpt-5-nano          | without |     67% |        6 816 |         5 266 | 0.34¢ |     55.7 |                2.0 |        — |
-| gpt-5-nano          | with    |     50% |        4 960 |         4 953 | 0.31¢ |     44.8 |                1.7 |      0.7 |
-| qwen3-coder-30b-a3b | without |      0% |      346 889 |         4 757 | 5.49¢ |     44.3 |                5.0 |        — |
-| qwen3-coder-30b-a3b | with    |     17% |      240 136 |         3 615 | 3.82¢ |     37.8 |                4.3 |      2.8 |
+The gain is where bashlight actually stepped in: on `uv-cli` and `poetry-django-lite`
+the model kept running `pytest`, `python` and `pip` outside the project's environment,
+and bashlight rewrote 3–6 commands per run into `uv run …` / `poetry run …` /
+`uv add …`. Where bashlight had nothing to correct, the results are noise in both
+directions: `pnpm-web` went 3/5 → 1/5 with zero rewrites in the "with" runs, and the
+monorepo task is beyond this model in both modes. Finishing more tasks also means longer
+runs: gpt-5-nano's mean cost per run rose from $0.0053 to $0.0063.
 
-All values except success are per-run means (6 runs per row).
+## No measurable overhead on flash-class models
 
-## Reading it
+![Median change in cost and wall time for flash-class models, with the noise band](assets/benchmark/headline-cost-time.svg)
 
-- **Cheaper and faster.** With the plugin, every model used fewer tokens: cost per run
-  dropped by 25% (deepseek), 9% (gpt-5-nano) and 30% (qwen), and wall time by 15–20%.
-  Fewer shell calls failed, because `pytest`, `python` and `npx` ran in the right
-  environment the first time instead of erroring and being retried.
-- **Success rates are dominated by the models.** deepseek solves everything either way;
-  qwen mostly fails to install the dependency at all. The gpt-5-nano difference is a
-  single run out of six, and in the failing "with" runs the audit log shows the plugin
-  either did nothing or rewrote `pytest` to `poetry run pytest` correctly — the model
-  then stopped without adding the library.
-- **Small sample.** Two repetitions per cell is enough to see the cost and time trend,
-  not to measure success-rate effects precisely. The tasks are also easy: capable models
-  often run `poetry add` or `uv run` by themselves, so bashlight rewrote only a handful
-  of commands per run.
+Flash-class models mostly use the right tools by themselves, so bashlight has less to do
+— about one rewrite per run. Each square is the median change across the five tasks;
+whiskers span the tasks. Cells where bashlight rewrote nothing still swing by ±20–50%,
+so we read anything inside ±10% as "no difference": the plugin costs nothing measurable
+on these models, and we make no cost-saving claim for them.
+
+## How it was measured
+
+| Project              | Toolchain                        | The task                                                               |
+| -------------------- | -------------------------------- | ---------------------------------------------------------------------- |
+| `monorepo`           | Poetry API + pnpm front, no root | add an API helper using python-slugify and a client parser using zod   |
+| `uv-cli`             | uv, with ruff and mypy           | add `table` (tabulate) and `config` (PyYAML) subcommands, tests, lint  |
+| `poetry-django-lite` | Poetry, executable `./manage.py` | add a `report` command (PyYAML) writing a CSV, run it, test it         |
+| `scripts`            | none — just a data file          | convert `data.yaml` to `data.csv` with a kept Python script (PyYAML)   |
+| `pnpm-web`           | pnpm, vitest, tsc, eslint        | add `formatRelative` (dayjs) and `parseItem` (zod), tests, types, lint |
+
+- Prompts describe the feature and the libraries it uses, never the toolchain: the agent
+  has to discover Poetry, uv or pnpm by itself. Each task has an objective checker
+  (tests, linters, type checker, declared dependencies, produced files).
+- Every run is headless (`opencode run --format json`) in a fresh copy of the project,
+  with an isolated OpenCode configuration: no MCP servers, no personal instructions, no
+  other plugins. In "with" runs bashlight is installed in that configuration, like a
+  user would, never inside the project.
+- 3 models × 5 projects × 2 modes × 5 repetitions. Only **matched cells** are compared
+  (a project × model pair with runs in both modes), each weighted once; changes are the
+  median of the per-cell changes. One run that hit the harness timeout is excluded.
+
+**Caveats.** Five repetitions per cell show the completion effect on gpt-5-nano clearly
+but leave cost and time differences under about ±10% indistinguishable from noise. The
+tasks are small (from a few seconds to under three minutes of agent time); longer
+sessions accumulate more misfired commands, which we have not measured. Results are for
+these models, prices and OpenCode 2.2.5.
 
 ## Running it
 
 ```console
-$ bun bench/run.ts --repeat 2 --max-cost 2     # the full matrix, capped at $2
-$ bun bench/report.ts                          # regenerate bench/RESULTS.md
+$ bun bench/run.ts --repeat 5 --jobs 3 --max-cost 3   # the full matrix, capped at $3
+$ bun bench/report.ts                                  # RESULTS.md, HEADLINES.json, charts
 ```
 
 The runner reads the OpenRouter key from your OpenCode credentials, passes it only to
-the child process, and stops before a run whose projected cost would exceed
-`--max-cost`. See
-[`bench/README.md`](https://github.com/OffworldNexus/bashlight/blob/develop/bench/README.md)
-for the details.
+the child processes, stops before a run whose projected cost would exceed `--max-cost`,
+and prunes each run's directory once its metrics are extracted. See
+[`bench/README.md`](https://github.com/OffworldNexus/bashlight/blob/develop/bench/README.md).

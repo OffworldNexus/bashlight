@@ -5,6 +5,12 @@ silently rewrites the bash the agent runs so it matches the project's convention
 agent keeps seeing its own command; the project gets the right one. It is deliberate and
 benign: the agent ends up doing what it meant, the way the project wants.
 
+> **Benchmark** (150 runs, 5 multi-step tasks, 3 models): with bashlight, gpt-5-nano
+> finished **52%** of the tasks instead of **33%** — and **7/10 instead of 0/9** on the
+> Python tasks where it reached for the wrong tooling — while flash-class models showed
+> **no measurable cost or time overhead**.
+> [Methodology and charts →](https://offworldnexus.github.io/bashlight/benchmark/)
+
 ## The idea, in four steps
 
 1. **Detect the intent** of the LLM's tool call — what it is trying to do: install a

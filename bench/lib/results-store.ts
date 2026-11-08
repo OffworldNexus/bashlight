@@ -9,6 +9,16 @@
 import type { BenchFileSystem } from "./fs.ts";
 import type { RunRecord } from "./types.ts";
 
+/**
+ * Whether a file name looks like a benchmark results file: the ISO timestamp
+ * the runner writes, e.g. `2026-11-08T18-33-21-067Z.jsonl`. Anything else
+ * (an archived `v1-…` file, a hand-written fixture) is never auto-discovered,
+ * so the report can never mix versions.
+ */
+export function isResultsFileName(name: string): boolean {
+    return /^\d{4}-\d{2}-\d{2}T.*\.jsonl$/.test(name);
+}
+
 /** Parses JSONL records, keeping only well-formed ones. */
 export function parseResults(text: string): readonly RunRecord[] {
     const records: RunRecord[] = [];

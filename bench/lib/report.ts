@@ -612,7 +612,7 @@ export function renderReport(
         lines.push(
             "## Harness errors (excluded)",
             "",
-            `${harness.length} run(s) failed because of the harness or its environment and are excluded from every statistic (they are not task failures).`,
+            `${harness.length} run(s) failed for harness/environment reasons and are excluded from every statistic.`,
             "",
             ...table(
                 ["Project", "Model", "Mode", "Run ID", "Error"],

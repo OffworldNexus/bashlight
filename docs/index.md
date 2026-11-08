@@ -13,6 +13,14 @@ silently rewrites the bash the agent runs to match the project's conventions. Th
 keeps seeing its own command; the project gets the right one. It is deliberate and
 benign: the agent ends up doing what it meant, the way the project wants.
 
+!!! success "What it changes, measured"
+
+    In [our benchmark](benchmark.md) (150 runs, 5 multi-step tasks, 3 models), the small
+    gpt-5-nano finished **52%** of the tasks with bashlight instead of **33%** without —
+    **7/10 instead of 0/9** on the Python tasks where it reached for the wrong tooling.
+    Flash-class models, which mostly get the tooling right on their own, showed **no
+    measurable cost or time overhead**.
+
 ## The idea, in four steps
 
 1. **Detect the intent** of the LLM's tool call — what it is trying to do: install a

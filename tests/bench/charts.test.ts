@@ -60,33 +60,43 @@ const index = matchCells([
 ]);
 
 describe("headlineCompletion", () => {
-    test("lists every matched model smallest first", () => {
+    test("lists the small tier's tasks ordered by gain, then all tasks", () => {
         const spec = headlineCompletion(index);
         expect(spec.panels[0]?.categories.map((category) => category.label)).toEqual([
-            "gpt-5-nano",
-            "claude-haiku-5.5",
-            "deepseek-v4.1-flash",
+            "p1",
+            "p2",
+            "all tasks",
         ]);
     });
 
-    test("has a with/without series and a matched-cell subtitle", () => {
+    test("names the model and the matched cells in the subtitle", () => {
         const spec = headlineCompletion(index);
-        expect(spec.series.map((series) => series.name)).toEqual(["without", "with"]);
+        expect(spec.subtitle).toContain("gpt-5-nano");
         expect(spec.subtitle).toContain("matched cells");
-        const values = spec.panels[0]?.categories[0]?.values ?? [];
-        expect(values).toHaveLength(2);
-        expect(values[1]?.value).toBe(100);
+        expect(spec.series.map((series) => series.name)).toEqual(["without", "with"]);
+    });
+
+    test("has no whiskers and carries an n note per pair", () => {
+        const spec = headlineCompletion(index);
+        const categories = spec.panels[0]?.categories ?? [];
+        expect(categories[0]?.values.every((bar) => bar.min === undefined)).toBe(true);
+        expect(categories[0]?.note).toBe("n=1");
+        expect(categories[2]?.note).toBe("n=2");
+        expect(categories[2]?.values[1]?.value).toBe(100);
     });
 });
 
 describe("headlineCostTime", () => {
-    test("covers only flash-class models", () => {
+    test("covers only flash-class models, neutral with a noise band", () => {
         const spec = headlineCostTime(index);
         expect(spec.categories.map((category) => category.label)).toEqual([
             "claude-haiku-5.5",
             "deepseek-v4.1-flash",
         ]);
         expect(spec.metrics).toEqual(["cost / run", "wall time"]);
+        expect(spec.neutral).toBe(true);
+        expect(spec.band?.value).toBe(10);
+        expect(spec.title).toContain("No measurable overhead");
     });
 
     test("reports the paired median and a whisker across cells", () => {

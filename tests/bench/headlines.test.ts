@@ -150,6 +150,19 @@ describe("buildHeadlines", () => {
         expect(deepseek.successWithout).toBe(0);
         expect(deepseek.successWith).toBe(1);
     });
+
+    test("reports per-task completion for the small tier", () => {
+        expect(headlines.smallTier?.model).toBe(NANO);
+        expect(headlines.smallTier?.tasks.map((task) => task.project)).toEqual([
+            "p1",
+            "p2",
+        ]);
+        expect(headlines.smallTier?.tasks[0]?.deltaPoints).toBeCloseTo(100, 10);
+        expect(headlines.smallTier?.overall.runsWithout).toBe(2);
+        expect(headlines.smallTier?.overall.runsWith).toBe(2);
+        expect(headlines.smallTier?.overall.successWithout).toBe(0);
+        expect(headlines.smallTier?.overall.successWith).toBe(1);
+    });
 });
 
 describe("headlinesDocument", () => {
@@ -168,5 +181,17 @@ describe("headlinesDocument", () => {
         ]);
         expect(completion.models[0]?.successWith).toBe(1);
         expect(completion.models[0]?.successWithout).toBe(0);
+    });
+
+    test("includes the small tier's per-task completion", () => {
+        const document = headlinesDocument(buildHeadlines(matchCells(boundaries())));
+        const small = document.smallTierCompletion as {
+            model: string;
+            tasks: { project: string }[];
+            overall: { runsWith: number };
+        };
+        expect(small.model).toBe(NANO);
+        expect(small.tasks.map((task) => task.project)).toEqual(["p1", "p2"]);
+        expect(small.overall.runsWith).toBe(2);
     });
 });

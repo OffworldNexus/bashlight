@@ -27,11 +27,11 @@ import {
     mergeRecords,
     renderReport,
 } from "./lib/report.ts";
-import { parseResults } from "./lib/results-store.ts";
+import { isResultsFileName, parseResults } from "./lib/results-store.ts";
 
 function resultsFiles(directory: string): readonly string[] {
     return readdirSync(directory)
-        .filter((name) => name.endsWith(".jsonl"))
+        .filter(isResultsFileName)
         .sort((left, right) => left.localeCompare(right))
         .map((name) => join(directory, name));
 }

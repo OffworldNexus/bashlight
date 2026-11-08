@@ -28,16 +28,16 @@ import type {
 import { renderChart, renderDeltaChart } from "./lib/chart.ts";
 import type { BenchFileSystem } from "./lib/fs.ts";
 import { NodeBenchFileSystem } from "./lib/fs.ts";
-import { buildHeadlines } from "./lib/headlines.ts";
-import { shortModel } from "./lib/models.ts";
+import { buildHeadlines, type TaskCompletion } from "./lib/headlines.ts";
+import { shortModel, tierOf } from "./lib/models.ts";
 import {
+    cellId,
     type CellIndex,
     cellMeans,
     costMetric,
     deltaFromValue,
     failedMetric,
     matchCells,
-    matchedSummary,
     mean,
     mergeRecords,
     type Metric,
@@ -49,7 +49,7 @@ import {
     UNAVAILABLE_DELTA,
     wallMetric,
 } from "./lib/report.ts";
-import { parseResults } from "./lib/results-store.ts";
+import { isResultsFileName, parseResults } from "./lib/results-store.ts";
 import type { Mode, RunRecord } from "./lib/types.ts";
 
 export const WITHOUT_COLOR = "#f59e0b";
@@ -127,37 +127,74 @@ function deltaBar(change: PairedChange): DeltaBar {
     };
 }
 
-/** Message 1: cost and wall-time change, flash-class models only. */
+/** `n=…` under a completion pair (without/with when the two differ). */
+function runNote(runsWithout: number, runsWith: number): string {
+    return runsWithout === runsWith ? `n=${runsWith}` : `n=${runsWithout}/${runsWith}`;
+}
+
+/**
+ * Message 1: cost and wall-time change, flash-class models only. No
+ * better/worse colouring — the changes are within run-to-run noise, so every
+ * bar is neutral and a shaded band marks that noise level.
+ */
 export function headlineCostTime(index: CellIndex): DeltaChartSpec {
+    const headlines = buildHeadlines(index);
+    const flashCells = index.matched.filter((cell) => tierOf(cell.model) === "flash");
+    const runs = flashCells.reduce(
+        (sum, cell) =>
+            sum +
+            (index.withRuns.get(cellId(cell))?.length ?? 0) +
+            (index.withoutRuns.get(cellId(cell))?.length ?? 0),
+        0,
+    );
     return {
-        title: "Cost and time change, flash-class models",
-        subtitle: matchedSummary(index),
+        title: "No measurable overhead on flash-class models",
+        subtitle: `${flashCells.length} matched cells, ${runs} runs`,
         metrics: ["cost / run", "wall time"],
-        categories: buildHeadlines(index).costTime.map((headline) => ({
+        neutral: true,
+        band: { value: 10, label: "noise ±10%" },
+        categories: headlines.costTime.map((headline) => ({
             label: headline.display,
             bars: [deltaBar(headline.cost), deltaBar(headline.time)],
         })),
     };
 }
 
-/** Message 2: completion with vs without, every model, smallest first. */
+/**
+ * Message 2: for the smallest model tier, completion with vs without per task,
+ * ordered by the gain, plus an "all tasks" group. No whiskers — each bar is a
+ * completion rate over that task's runs.
+ */
 export function headlineCompletion(index: CellIndex): ChartSpec {
-    const headlines = buildHeadlines(index);
-    const models = headlines.completion.map((headline) => headline.model);
-    const categories = categoriesFor(index, (cell) => cell.model, models, successMetric)
-        .map(percentCategory)
-        .map((category, position) => ({
-            ...category,
-            label:
-                headlines.completion[position]?.display ?? shortModel(category.label),
-        }));
+    const small = buildHeadlines(index).smallTier;
+    const categories: ChartCategory[] = [];
+    if (small !== undefined) {
+        const push = (task: TaskCompletion, label: string) => {
+            categories.push({
+                label,
+                note: runNote(task.runsWithout, task.runsWith),
+                values: [
+                    { value: task.successWithout * 100 },
+                    { value: task.successWith * 100 },
+                ],
+            });
+        };
+        for (const task of small.tasks) {
+            push(task, task.project);
+        }
+        push(small.overall, "all tasks");
+    }
     return {
-        title: "Completion rate by model",
-        subtitle: matchedSummary(index),
+        title: "Smaller models finish more tasks",
+        subtitle:
+            small === undefined
+                ? "no small-tier model in the results"
+                : `${small.display} · ${small.cells} matched cells, ${small.runs} runs`,
         series: SERIES,
+        width: 880,
         panels: [
             {
-                yLabel: "Success",
+                yLabel: "Completion",
                 categories,
                 format: (value) => `${value.toFixed(0)}%`,
             },
@@ -476,7 +513,7 @@ if (import.meta.main) {
         files.length > 0
             ? files
             : readdirSync(join(benchDir, "results"))
-                  .filter((name) => name.endsWith(".jsonl"))
+                  .filter(isResultsFileName)
                   .map((name) => join(benchDir, "results", name));
     const records = readRecords(sources, fs);
     const headlines = writeHeadlineCharts(records, chartsDirectory(repoRoot), fs);

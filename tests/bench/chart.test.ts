@@ -156,6 +156,30 @@ describe("renderChart", () => {
         };
         expect(renderChart(withoutWhiskers)).not.toContain('stroke-width="1.5"');
     });
+
+    test("renders a category note under the label", () => {
+        const withNote = {
+            ...spec,
+            panels: [
+                {
+                    yLabel: "Success",
+                    format: (value: number) => `${value.toFixed(0)}%`,
+                    categories: [
+                        {
+                            label: "m1",
+                            note: "n=5/4",
+                            values: [{ value: 33 }, { value: 100 }],
+                        },
+                    ],
+                },
+            ],
+        };
+        expect(renderChart(withNote)).toContain(">n=5/4</text>");
+    });
+
+    test("never draws a value label in white", () => {
+        expect(renderChart(spec)).not.toContain("#ffffff");
+    });
 });
 
 describe("renderDeltaChart", () => {
@@ -217,5 +241,43 @@ describe("renderDeltaChart", () => {
         const svg = renderDeltaChart(spec);
         expect(svg).toContain("n/a");
         expect(svg).toContain(">n/a</text>");
+    });
+
+    test("neutral mode uses one colour and draws a labelled noise band", () => {
+        const svg = renderDeltaChart({
+            title: "No measurable overhead",
+            metrics: ["cost / run", "wall time"],
+            neutral: true,
+            band: { value: 10, label: "noise ±10%" },
+            categories: [
+                {
+                    label: "m1",
+                    bars: [
+                        {
+                            value: -4,
+                            label: "−4%",
+                            tone: "better" as const,
+                            available: true,
+                            min: -22,
+                            max: 1,
+                        },
+                        {
+                            value: 0,
+                            label: "0%",
+                            tone: "same" as const,
+                            available: true,
+                            min: -11,
+                            max: 2,
+                        },
+                    ],
+                },
+            ],
+        });
+        expect(svg).toContain("#64748b");
+        expect(svg).not.toContain("#16a34a");
+        expect(svg).not.toContain("#dc2626");
+        expect(svg).toContain("noise ±10%");
+        expect(svg).toContain("median change");
+        expect(svg).toContain("−4%");
     });
 });
