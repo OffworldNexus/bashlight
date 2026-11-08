@@ -74,7 +74,8 @@ $ bun bin/bashlight watch --since 10m
 [Getting started](https://offworldnexus.github.io/bashlight/getting-started/) ·
 [How it works](https://offworldnexus.github.io/bashlight/how-it-works/) ·
 [Rules](https://offworldnexus.github.io/bashlight/rules/) ·
-[Monitoring](https://offworldnexus.github.io/bashlight/monitoring/)
+[Monitoring](https://offworldnexus.github.io/bashlight/monitoring/) ·
+[Benchmark](https://offworldnexus.github.io/bashlight/benchmark/)
 
 ## Development
 
