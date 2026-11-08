@@ -62,7 +62,7 @@ function main(): number {
         return 1;
     }
     const checker = new PrivateTermChecker(loadTerms(termsPath));
-    const findings = gitFiles(process.argv.includes("--all"))
+    const findings = gitFiles(process.argv.slice(2).some((arg) => arg === "--all"))
         .filter((path) => existsSync(path))
         .flatMap((path) => checker.findings(path, readFileSync(path, "utf8")));
     for (const finding of findings) {

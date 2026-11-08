@@ -37,4 +37,18 @@ export default ts.config(
         files: ["**/*.js"],
         ...ts.configs.disableTypeChecked,
     },
+    {
+        // The corpus extractor is a one-off tool built around large, deliberately
+        // permissive anonymization regexes and nullable probes; these heuristics
+        // do not apply well to it.
+        files: ["scripts/corpus/**/*.ts"],
+        rules: {
+            "sonarjs/function-return-type": "off",
+            "sonarjs/cognitive-complexity": "off",
+            "sonarjs/super-linear-regex": "off",
+            "sonarjs/regex-complexity": "off",
+            "sonarjs/duplicates-in-character-class": "off",
+            "sonarjs/publicly-writable-directories": "off",
+        },
+    },
 );
