@@ -18,6 +18,10 @@ export interface RunOptions {
     readonly maxCostUsd: number;
     readonly timeoutMs: number;
     readonly jobs: number;
+    /** Stop cleanly when free space on the run root drops below this. */
+    readonly minFreeBytes: number;
+    /** Keep the large per-run working directories. */
+    readonly keepRuns: boolean;
 }
 
 export interface RunDefaults {
@@ -39,6 +43,8 @@ interface Draft {
     maxCostUsd: number;
     timeoutMs: number;
     jobs: number;
+    minFreeBytes: number;
+    keepRuns: boolean;
 }
 
 function splitList(value: string): string[] {
@@ -114,6 +120,14 @@ function applyFlag(
             draft.jobs = parsed;
             return undefined;
         }
+        case "--min-free-gb": {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed) || parsed < 0) {
+                return "--min-free-gb must be a non-negative number";
+            }
+            draft.minFreeBytes = parsed * 1024 ** 3;
+            return undefined;
+        }
         default:
             return `unknown argument: ${flag}`;
     }
@@ -145,6 +159,8 @@ export function parseRunArgs(
         maxCostUsd: Number.POSITIVE_INFINITY,
         timeoutMs: 600_000,
         jobs: 3,
+        minFreeBytes: 2 * 1024 ** 3,
+        keepRuns: false,
     };
     let index = 0;
     while (index < argv.length) {
@@ -155,6 +171,11 @@ export function parseRunArgs(
         const [flag = "", inline] = raw.split("=", 2);
         if (flag === "--dry-run") {
             draft.dryRun = true;
+            index += 1;
+            continue;
+        }
+        if (flag === "--keep-runs") {
+            draft.keepRuns = true;
             index += 1;
             continue;
         }
@@ -191,6 +212,8 @@ export const USAGE = [
     "  --projects all|a,b    projects (default: all)",
     "  --repeat N            repeats per cell (default: 1)",
     "  --jobs N              runs to execute at once (default: 3)",
+    "  --min-free-gb N       stop cleanly below N GB free (default: 2)",
+    "  --keep-runs           keep the large per-run working directories",
     "  --max-cost N          stop before a run whose projection exceeds N USD",
     "  --timeout N           per-run timeout in seconds (default: 600)",
     "  --dry-run             print the matrix without running it",

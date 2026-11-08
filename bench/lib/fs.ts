@@ -14,6 +14,7 @@ import {
     readdirSync,
     readFileSync,
     rmSync,
+    statfsSync,
     statSync,
     writeFileSync,
 } from "node:fs";
@@ -34,6 +35,52 @@ export interface BenchFileSystem {
     copyTree(from: string, to: string, skip: (path: string) => boolean): void;
     /** Removes a file or directory tree, ignoring a missing target. */
     remove(path: string): void;
+}
+
+/** Directories with nothing a checker or a diff ever needs to read. */
+export const IGNORED_DIRECTORIES = new Set([
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+]);
+
+/**
+ * Recursively collects file paths under `directory` matching `wanted`,
+ * skipping the directories in {@link IGNORED_DIRECTORIES}.
+ */
+export function walkFiles(
+    fs: BenchFileSystem,
+    directory: string,
+    wanted: (path: string) => boolean,
+): readonly string[] {
+    const found: string[] = [];
+    for (const entry of fs.readDirectory(directory)) {
+        if (IGNORED_DIRECTORIES.has(entry)) {
+            continue;
+        }
+        const path = `${directory}/${entry}`;
+        if (fs.isDirectory(path)) {
+            found.push(...walkFiles(fs, path, wanted));
+        } else if (wanted(path)) {
+            found.push(path);
+        }
+    }
+    return found;
+}
+
+/** Free bytes on the filesystem holding `path` (statfs, no shell). */
+export function nodeFreeBytes(path: string): number {
+    try {
+        const stats = statfsSync(path);
+        return stats.bavail * stats.bsize;
+    } catch {
+        return Number.POSITIVE_INFINITY;
+    }
 }
 
 /** The real filesystem. */

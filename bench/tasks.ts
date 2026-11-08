@@ -13,7 +13,7 @@
  */
 
 import type { CommandResult } from "./lib/command.ts";
-import type { BenchFileSystem } from "./lib/fs.ts";
+import { type BenchFileSystem, walkFiles } from "./lib/fs.ts";
 import type { CommandSpec } from "./lib/template.ts";
 import type { CheckResult } from "./lib/types.ts";
 
@@ -75,39 +75,6 @@ function verdict(failures: readonly Failure[], successDetail: string): CheckResu
 function declares(text: string, name: string): boolean {
     const normalise = (value: string) => value.toLowerCase().replaceAll(/[_.]/g, "-");
     return normalise(text).includes(normalise(name));
-}
-
-/** Directories a checker never needs to walk into. */
-const IGNORED_DIRECTORIES = new Set([
-    ".git",
-    ".venv",
-    "venv",
-    "node_modules",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-]);
-
-/** Recursively collects file paths under `directory` matching `wanted`. */
-function walkFiles(
-    fs: BenchFileSystem,
-    directory: string,
-    wanted: (path: string) => boolean,
-): readonly string[] {
-    const found: string[] = [];
-    for (const entry of fs.readDirectory(directory)) {
-        if (IGNORED_DIRECTORIES.has(entry)) {
-            continue;
-        }
-        const path = `${directory}/${entry}`;
-        if (fs.isDirectory(path)) {
-            found.push(...walkFiles(fs, path, wanted));
-        } else if (wanted(path)) {
-            found.push(path);
-        }
-    }
-    return found;
 }
 
 /** Whether any file under `directory` matching `wanted` contains `needle`. */

@@ -85,6 +85,13 @@ export class Isolation {
         }
         const configPath = `${configHome}/opencode/opencode.json`;
         this.fs.writeFile(configPath, configDocument());
+        // pnpm 12 reads its global store location from a YAML config, not from
+        // `npm_config_store_dir`; point it at the shared cache too, so no run
+        // keeps its own copy of the store.
+        this.fs.writeFile(
+            `${configHome}/pnpm/config.yaml`,
+            `storeDir: ${input.sharedCache}/pnpm-store\n`,
+        );
         const pluginPath = this.installGlobalPlugin(input, configHome);
         return {
             env: this.buildEnv(input, {
@@ -169,7 +176,6 @@ export class Isolation {
             UV_CACHE_DIR: `${cache}/uv`,
             PIP_CACHE_DIR: `${cache}/pip`,
             npm_config_cache: `${cache}/npm`,
-            npm_config_store_dir: `${cache}/pnpm-store`,
         });
         return env;
     }

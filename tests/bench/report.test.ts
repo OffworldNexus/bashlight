@@ -231,6 +231,31 @@ describe("renderReport", () => {
     });
 });
 
+describe("harnessError exclusion", () => {
+    test("a harness error is neither matched nor listed as unmatched", () => {
+        const records = [
+            record({ runId: "w", project: "p1", model: "m1", mode: "with" }),
+            record({ runId: "wo", project: "p1", model: "m1", mode: "without" }),
+            record({
+                runId: "bad",
+                project: "p2",
+                model: "m1",
+                mode: "with",
+                success: false,
+                harnessError: true,
+                error: "ENOSPC: no space left on device",
+            }),
+        ];
+        const index = matchCells(records);
+        expect(index.matchedRuns.map((entry) => entry.runId)).toEqual(["w", "wo"]);
+        expect(index.excluded).toHaveLength(0);
+        const markdown = renderReport(records);
+        expect(markdown).toContain("Matched cells: 1 · Runs: 2");
+        expect(markdown).toContain("## Harness errors (excluded)");
+        expect(markdown).toContain("ENOSPC");
+    });
+});
+
 describe("writeHeadlineCharts", () => {
     test("writes nothing when there are no matched cells", () => {
         const fs = new MemoryFileSystem();

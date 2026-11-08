@@ -20,6 +20,7 @@ import { parseActivity } from "./events.ts";
 import type { BenchFileSystem } from "./fs.ts";
 import { Isolation } from "./isolation.ts";
 import type { OpenCodeRunner } from "./opencode-runner.ts";
+import { RunPruner } from "./prune.ts";
 import type { ResultsStore } from "./results-store.ts";
 import { resolveCommand, TemplatePreparer } from "./template.ts";
 import type { Mode, RunRecord } from "./types.ts";
@@ -59,10 +60,13 @@ export interface BenchDependencies {
     readonly openCodeRunner: OpenCodeRunner;
     readonly preparer: TemplatePreparer;
     readonly isolation: Isolation;
+    readonly pruner: RunPruner;
     readonly credentials: OpenRouterCredentials;
     readonly results: ResultsStore;
     readonly logger: BenchLogger;
     readonly clock: { now(): number };
+    /** Free bytes on the filesystem holding a path. */
+    readonly freeBytes: (path: string) => number;
 }
 
 export interface BenchRunOptions {
@@ -75,10 +79,24 @@ export interface BenchRunOptions {
     readonly timeoutMs: number;
     /** How many runs may execute at once. */
     readonly jobs: number;
+    /** Stop cleanly before a run when free space drops below this. */
+    readonly minFreeBytes: number;
+    /** Keep the large working directories instead of pruning them. */
+    readonly keepRuns: boolean;
 }
 
 const TASK_INSTALL_TIMEOUT_MS = 300_000;
 const CHECK_TIMEOUT_MS = 300_000;
+
+/** Whether free space is low enough that the matrix must stop. */
+export function shouldStopForSpace(freeBytes: number, minFreeBytes: number): boolean {
+    return freeBytes < minFreeBytes;
+}
+
+/** Matches an out-of-space or out-of-memory style environment failure. */
+function isEnvironmentFailure(text: string): boolean {
+    return /ENOSPC|No space left on device|ENOMEM|Cannot allocate memory/i.test(text);
+}
 
 /** Expands the matrix in a stable order, repeats as the innermost loop. */
 export function buildMatrix(options: BenchRunOptions): readonly BenchCell[] {
@@ -130,9 +148,18 @@ export class BenchRunner {
         let inFlight = 0;
         let stopped = false;
 
+        // eslint-disable-next-line sonarjs/cognitive-complexity -- the matrix loop
         const worker = async (): Promise<void> => {
             for (;;) {
                 if (stopped) {
+                    return;
+                }
+                const free = this.deps.freeBytes(this.config.runsDir);
+                if (shouldStopForSpace(free, options.minFreeBytes)) {
+                    stopped = true;
+                    this.deps.logger.line(
+                        `stopping: ${(free / 1024 ** 3).toFixed(2)} GB free on ${this.config.runsDir} is below the ${(options.minFreeBytes / 1024 ** 3).toFixed(2)} GB minimum; remove old run directories or lower --min-free-gb`,
+                    );
                     return;
                 }
                 const projection = guard.check(inFlight);
@@ -150,25 +177,69 @@ export class BenchRunner {
                 next += 1;
                 launched += 1;
                 inFlight += 1;
+                const paths = this.runPaths(cell, runStamp);
                 let record: RunRecord;
                 try {
                     record = await this.runCell(cell, runStamp, options);
                 } catch (error) {
-                    record = this.errorRecord(cell, `run failed: ${String(error)}`, 0);
+                    record = this.errorRecord(
+                        cell,
+                        `run failed: ${String(error)}`,
+                        0,
+                        true,
+                    );
                 } finally {
                     inFlight -= 1;
+                }
+                if (!options.keepRuns) {
+                    this.prune(paths, cell.project);
                 }
                 this.deps.results.append(record);
                 records.push(record);
                 guard.record(record.costUsd);
+                let outcome: string;
+                if (record.harnessError) {
+                    outcome = "harness-error";
+                } else {
+                    outcome = record.success ? "pass" : "fail";
+                }
                 this.deps.logger.line(
-                    `[${launched}/${total}] ${cell.project} ${cell.mode} ${cell.model} #${cell.iteration} → ${record.success ? "pass" : "fail"} · $${record.costUsd.toFixed(4)} · ${(record.wallMs / 1000).toFixed(1)}s · in ${record.tokens.input} out ${record.tokens.output}`,
+                    `[${launched}/${total}] ${cell.project} ${cell.mode} ${cell.model} #${cell.iteration} → ${outcome} · $${record.costUsd.toFixed(4)} · ${(record.wallMs / 1000).toFixed(1)}s · in ${record.tokens.input} out ${record.tokens.output}`,
                 );
             }
         };
 
         await Promise.all(Array.from({ length: workers }, worker));
         return records;
+    }
+
+    /** The three paths of a run, shared by the run itself and its pruning. */
+    private runPaths(
+        cell: BenchCell,
+        runStamp: string,
+    ): { runId: string; runDirectory: string; projectDirectory: string } {
+        const runId = `${runStamp}-${cell.project}-${cell.mode}-${slug(cell.model)}-r${cell.iteration}`;
+        const runDirectory = `${this.config.runsDir}/${runId}`;
+        return { runId, runDirectory, projectDirectory: `${runDirectory}/project` };
+    }
+
+    /** Prunes one finished run, never letting a prune error fail the matrix. */
+    private prune(
+        paths: { runId: string; runDirectory: string; projectDirectory: string },
+        project: string,
+    ): void {
+        try {
+            this.deps.pruner.prune({
+                runDirectory: paths.runDirectory,
+                projectDirectory: paths.projectDirectory,
+                templateDirectory: `${this.config.templatesDir}/${project}`,
+                artifactsDirectory: `${this.config.artifactsDir}/${paths.runId}`,
+            });
+        } catch (error) {
+            this.deps.logger.line(
+                `  prune failed for ${paths.runId}: ${String(error)}`,
+            );
+        }
     }
 
     /** Runs one cell end to end and returns its record. */
@@ -179,11 +250,9 @@ export class BenchRunner {
     ): Promise<RunRecord> {
         const task = this.tasks.find((item) => item.project === cell.project);
         if (task === undefined) {
-            return this.errorRecord(cell, "unknown project", 0);
+            return this.errorRecord(cell, "unknown project", 0, true);
         }
-        const runId = `${runStamp}-${cell.project}-${cell.mode}-${slug(cell.model)}-r${cell.iteration}`;
-        const runDirectory = `${this.config.runsDir}/${runId}`;
-        const projectDirectory = `${runDirectory}/project`;
+        const { runId, runDirectory, projectDirectory } = this.runPaths(cell, runStamp);
         this.deps.fs.mkdirp(runDirectory);
 
         const isolated = this.deps.isolation.setup({
@@ -209,6 +278,7 @@ export class BenchRunner {
                 cell,
                 `hydration failed: ${firstLine(hydrated.stderr)}`,
                 0,
+                true,
             );
         }
         // The plugin lives in the isolated global config root, so the project
@@ -219,6 +289,7 @@ export class BenchRunner {
                 cell,
                 "project copy contains a .opencode directory",
                 0,
+                true,
             );
         }
 
@@ -263,6 +334,14 @@ export class BenchRunner {
         } else if (result.timedOut) {
             error = "timed out";
         }
+        // A failure that is the harness's or the environment's — a harness
+        // timeout, a spawn error, or the disk filling up — is recorded but
+        // excluded from every statistic.
+        const harnessError =
+            result.timedOut ||
+            (result.code === null && !result.timedOut) ||
+            isEnvironmentFailure(`${result.stdout}\n${result.stderr}`) ||
+            isEnvironmentFailure(check.detail);
         const record: RunRecord = {
             runId,
             timestamp: startedAt.toISOString(),
@@ -280,6 +359,7 @@ export class BenchRunner {
             rewrites: audit.rewrites,
             blocks: audit.blocks,
             lastGreenMs: activity.lastGreenMs,
+            ...(harnessError ? { harnessError: true } : {}),
             ...(error === undefined ? {} : { error }),
         };
         return record;
@@ -300,8 +380,13 @@ export class BenchRunner {
         this.deps.fs.writeFile(`${directory}/check.txt`, `${detail}\n`);
     }
 
-    /** A record for a run that never got as far as the model. */
-    private errorRecord(cell: BenchCell, error: string, wallMs: number): RunRecord {
+    /** A record for a run that failed before the model could be judged. */
+    private errorRecord(
+        cell: BenchCell,
+        error: string,
+        wallMs: number,
+        harnessError: boolean,
+    ): RunRecord {
         return {
             runId: `${compactStamp(new Date(this.deps.clock.now()))}-${cell.project}-${cell.mode}-${slug(cell.model)}-r${cell.iteration}`,
             timestamp: new Date(this.deps.clock.now()).toISOString(),
@@ -319,6 +404,7 @@ export class BenchRunner {
             rewrites: 0,
             blocks: 0,
             lastGreenMs: 0,
+            ...(harnessError ? { harnessError: true } : {}),
             error,
         };
     }

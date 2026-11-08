@@ -88,6 +88,15 @@ describe("Isolation", () => {
         expect(isolation.projectHasLocalConfig(projectDirectory)).toBe(false);
     });
 
+    test("points pnpm at the shared store through its global config", () => {
+        const { runDirectory } = setup("without", "pnpm-store");
+        const yaml = readFileSync(
+            join(runDirectory, "config/pnpm/config.yaml"),
+            "utf8",
+        );
+        expect(yaml).toContain("storeDir: /shared-cache/pnpm-store");
+    });
+
     test("detects a project-local .opencode", () => {
         const { projectDirectory } = setup("without", "project-local");
         fs.writeFile(join(projectDirectory, ".opencode/plugins/x.ts"), "x");

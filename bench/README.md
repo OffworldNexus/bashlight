@@ -57,7 +57,18 @@ bun bench/report.ts --all-charts       # also write the exploratory charts to be
 
 Flags: `--models a,b`, `--modes with,without`, `--projects all|a,b`, `--repeat N`,
 `--jobs N` (parallel runs, default 3), `--timeout SECONDS`, `--max-cost USD`,
-`--dry-run`. The report takes `--all` (merge all files) and `--all-charts`.
+`--min-free-gb N`, `--keep-runs`, `--dry-run`. The report takes `--all` (merge all
+files) and `--all-charts`.
+
+After each run the working copy is **pruned**: the `.venv` / `node_modules`, the per-run
+cache and the session database are deleted, keeping only the transcript, the audit log,
+the OpenCode log, the checker output and a capped project-vs-template diff in
+`bench/runs/<id>/`. `--keep-runs` disables pruning for debugging. Package-manager caches
+are shared under `bench/.cache` (uv, poetry, pip, npm, pnpm store), never per run;
+before each run the runner stops cleanly if free space on the run root drops below
+`--min-free-gb` (default 2). A run that fails for an environment reason (out of disk,
+spawn error, harness timeout) is recorded as a harness error and excluded from every
+statistic.
 
 The runner runs up to `--jobs` isolated cells at once. Before starting another it asks a
 cost guard whether `spend + mean(completed) × (in flight + 1)` would cross `--max-cost`,

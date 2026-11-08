@@ -15,10 +15,11 @@ import { parseRunArgs, USAGE } from "./lib/args.ts";
 import { type BenchConfig, BenchRunner, envRecord } from "./lib/bench-runner.ts";
 import { ProcessRunner } from "./lib/command.ts";
 import { OpenRouterCredentials } from "./lib/credentials.ts";
-import { NodeBenchFileSystem } from "./lib/fs.ts";
+import { NodeBenchFileSystem, nodeFreeBytes } from "./lib/fs.ts";
 import { Isolation } from "./lib/isolation.ts";
 import { DEFAULT_MODEL_IDS } from "./lib/models.ts";
 import { OpenCodeRunner } from "./lib/opencode-runner.ts";
+import { RunPruner } from "./lib/prune.ts";
 import { ResultsStore } from "./lib/results-store.ts";
 import { TemplatePreparer } from "./lib/template.ts";
 import { TASKS } from "./tasks.ts";
@@ -87,6 +88,7 @@ async function main(): Promise<number> {
             openCodeRunner: new OpenCodeRunner(processRunner, config.opencodeBinary),
             preparer: new TemplatePreparer(fs, processRunner),
             isolation: new Isolation(fs),
+            pruner: new RunPruner(fs),
             credentials: new OpenRouterCredentials({
                 env: envRecord(),
                 readText: (path) => fs.readFile(path),
@@ -94,21 +96,36 @@ async function main(): Promise<number> {
             results: new ResultsStore(fs, resultsFile),
             logger: { line: (text) => process.stdout.write(`${text}\n`) },
             clock,
+            freeBytes: nodeFreeBytes,
         },
         config,
         TASKS,
     );
 
     const records = await runner.run({ ...options, projects });
-    if (!options.dryRun) {
-        const total = records.reduce((sum, record) => sum + record.costUsd, 0);
-        const passed = records.filter((record) => record.success).length;
+    if (options.dryRun) {
+        return 0;
+    }
+    const total = records.reduce((sum, record) => sum + record.costUsd, 0);
+    const harnessErrors = records.filter((record) => record.harnessError);
+    const passed = records.filter((record) => record.success).length;
+    process.stdout.write(
+        `\n${records.length} runs · ${passed} passed · ${harnessErrors.length} harness errors · $${total.toFixed(4)} spent\n` +
+            `results: ${resultsFile}\n`,
+    );
+    if (harnessErrors.length > 0) {
         process.stdout.write(
-            `\n${records.length} runs · ${passed} passed · $${total.toFixed(4)} spent\n` +
-                `results: ${resultsFile}\n`,
+            "\nharness errors (excluded from every statistic):\n" +
+                harnessErrors
+                    .map(
+                        (record) =>
+                            `  ${record.runId}: ${record.error ?? record.detail}`,
+                    )
+                    .join("\n") +
+                "\n",
         );
     }
-    return 0;
+    return harnessErrors.length > 0 ? 1 : 0;
 }
 
 main().then(

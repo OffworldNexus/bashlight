@@ -18,6 +18,18 @@ describe("parseRunArgs", () => {
         expect(parsed.options.repeat).toBe(1);
         expect(parsed.options.jobs).toBe(3);
         expect(parsed.options.maxCostUsd).toBe(Number.POSITIVE_INFINITY);
+        expect(parsed.options.minFreeBytes).toBe(2 * 1024 ** 3);
+        expect(parsed.options.keepRuns).toBe(false);
+    });
+
+    test("parses --min-free-gb and --keep-runs", () => {
+        const parsed = parseRunArgs(["--min-free-gb", "1.5", "--keep-runs"], defaults);
+        expect(parsed.ok).toBe(true);
+        if (parsed.ok) {
+            expect(parsed.options.minFreeBytes).toBe(1.5 * 1024 ** 3);
+            expect(parsed.options.keepRuns).toBe(true);
+        }
+        expect(parseRunArgs(["--min-free-gb", "nope"], defaults).ok).toBe(false);
     });
 
     test("accepts comma-separated values and inline assignments", () => {

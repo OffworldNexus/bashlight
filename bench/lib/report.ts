@@ -94,7 +94,9 @@ function bucketRuns(records: readonly RunRecord[]): {
 
 /** Keeps only the cells that have a completed run in both modes. */
 export function matchCells(records: readonly RunRecord[]): CellIndex {
-    const { withRuns, withoutRuns, keys } = bucketRuns(records);
+    // A harness/environment failure is not a result: it never counts.
+    const usable = records.filter((record) => record.harnessError !== true);
+    const { withRuns, withoutRuns, keys } = bucketRuns(usable);
     const matched: CellKey[] = [];
     for (const [id, cell] of keys) {
         if (
@@ -109,14 +111,19 @@ export function matchCells(records: readonly RunRecord[]): CellIndex {
         return byProject !== 0 ? byProject : left.model.localeCompare(right.model);
     });
     const matchedIds = new Set(matched.map(cellId));
-    const matchedRuns = records.filter((record) =>
+    const matchedRuns = usable.filter((record) =>
         matchedIds.has(cellId({ project: record.project, model: record.model })),
     );
-    const excluded = records.filter(
+    const excluded = usable.filter(
         (record) =>
             !matchedIds.has(cellId({ project: record.project, model: record.model })),
     );
     return { matched, matchedRuns, excluded, withRuns, withoutRuns };
+}
+
+/** Runs excluded from every statistic because the harness failed. */
+export function harnessErrorRuns(records: readonly RunRecord[]): readonly RunRecord[] {
+    return records.filter((record) => record.harnessError === true);
 }
 
 /** The runs of one matched cell in one mode. */
@@ -597,7 +604,32 @@ export function renderReport(
             `${index.excluded.length} unmatched run(s) are excluded from every comparison above.`,
             "",
             ...table(["Project", "Model", "Mode", "Run ID"], excludedRows(index), []),
+            "",
         );
+    }
+    const harness = harnessErrorRuns(records);
+    if (harness.length > 0) {
+        lines.push(
+            "## Harness errors (excluded)",
+            "",
+            `${harness.length} run(s) failed because of the harness or its environment and are excluded from every statistic (they are not task failures).`,
+            "",
+            ...table(
+                ["Project", "Model", "Mode", "Run ID", "Error"],
+                harness.map((record) => [
+                    record.project,
+                    record.model,
+                    record.mode,
+                    record.runId,
+                    record.error ?? record.detail,
+                ]),
+                [],
+            ),
+            "",
+        );
+    }
+    while (lines.length > 0 && lines[lines.length - 1] === "") {
+        lines.pop();
     }
     return `${lines.join("\n")}\n`;
 }

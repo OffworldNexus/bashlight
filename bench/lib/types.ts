@@ -99,5 +99,11 @@ export interface RunRecord {
     readonly blocks: number;
     /** Present from benchmark v2 on; older records omit it. */
     readonly lastGreenMs?: number;
+    /**
+     * True when the run failed because of the harness or its environment
+     * (out of disk, spawn errors, a harness timeout) rather than the model.
+     * Such runs are recorded but excluded from every statistic.
+     */
+    readonly harnessError?: boolean;
     readonly error?: string;
 }
