@@ -1,0 +1,4 @@
+node_modules
+bun.lock
+corpus/*.jsonl
+corpus/*.json
