@@ -3,3 +3,9 @@ bun.lock
 corpus
 .opencode/agent
 *.jsonl
+bench/projects
+bench/runs
+bench/results
+bench/.cache
+site
+.cache

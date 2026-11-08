@@ -10,7 +10,19 @@ import globals from "globals";
 import ts from "typescript-eslint";
 
 export default ts.config(
-    { ignores: ["node_modules", "corpus", "dist", ".opencode"] },
+    {
+        ignores: [
+            "node_modules",
+            "corpus",
+            "dist",
+            "site",
+            ".opencode",
+            "bench/projects",
+            "bench/runs",
+            "bench/results",
+            "bench/.cache",
+        ],
+    },
     js.configs.recommended,
     ...ts.configs.recommendedTypeChecked,
     sonarjs.configs.recommended,

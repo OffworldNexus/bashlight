@@ -19,7 +19,9 @@
         "lint": "prettier --check . && eslint .",
         "format": "prettier --write . && eslint --fix .",
         "corpus:extract": "bun scripts/corpus/extract.ts",
-        "corpus:report": "bun scripts/corpus/report.ts"
+        "corpus:report": "bun scripts/corpus/report.ts",
+        "bench": "bun bench/run.ts",
+        "bench:report": "bun bench/report.ts"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",

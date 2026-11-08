@@ -19,5 +19,13 @@
         "noUnusedParameters": true,
         "exactOptionalPropertyTypes": true
     },
-    "include": ["src", "tests", "scripts", "eslint.config.js", ".opencode/plugins"]
+    "include": [
+        "src",
+        "tests",
+        "scripts",
+        "eslint.config.js",
+        ".opencode/plugins",
+        "bench"
+    ],
+    "exclude": ["node_modules", "bench/projects", "bench/runs", "bench/.cache"]
 }

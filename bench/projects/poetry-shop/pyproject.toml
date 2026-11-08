@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "shop"
+version = "0.1.0"
+description = "A tiny shop library used by the bashlight benchmark."
+authors = ["Bashlight Bench <bench@example.com>"]
+packages = [{ include = "shop" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -8,3 +8,4 @@ site/
 corpus/raw/
 bench/runs/
 bench/.cache/
+.cache/

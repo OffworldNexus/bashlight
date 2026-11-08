@@ -1,0 +1,3 @@
+# Keep the virtualenv inside the project so every run copy is self-contained.
+[virtualenvs]
+in-project = true
