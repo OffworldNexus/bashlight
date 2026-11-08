@@ -11,6 +11,11 @@ export interface ProcessRequest {
     readonly cwd: string;
     /** The environment the shell will inherit (treated as complete). */
     readonly env: Readonly<Record<string, string>>;
+    /**
+     * The project root the command belongs to, when it differs from `cwd`.
+     * Custom rules are looked up relative to it; it defaults to `cwd`.
+     */
+    readonly projectDir?: string;
 }
 
 /** One command that a rule changed, for audit logs and debugging. */

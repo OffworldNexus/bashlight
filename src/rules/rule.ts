@@ -7,6 +7,7 @@
  * the rewriter figures out how to express that in the original script.
  */
 import type { EnvironmentView, Host } from "../interp/context.ts";
+import type { FileSystem } from "../project/file-system.ts";
 import type { ProjectInspector } from "../project/project-inspector.ts";
 import type { ScriptInspector } from "../project/script-inspector.ts";
 
@@ -44,6 +45,11 @@ export interface RuleContext {
     readonly project: ProjectInspector;
     /** Reads the shebang of script files (`./manage.py`, `bin/cli`…). */
     readonly scripts: ScriptInspector;
+    /**
+     * Read-only view of the real file system, so a rule can check for a
+     * `Makefile`, a config file, anything — without importing `node:fs`.
+     */
+    readonly files: FileSystem;
 }
 
 /** One word of a replacement argv. */

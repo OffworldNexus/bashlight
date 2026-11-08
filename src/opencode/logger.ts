@@ -1,3 +1,5 @@
+import type { RuleErrorSink, RuleFailure } from "../rules/rule-engine.ts";
+
 /**
  * Minimal logging seam for the OpenCode adapter.
  *
@@ -22,6 +24,25 @@ export class ConsoleLogger implements Logger {
             console.error(`[bashlight] ${message}`);
         } else {
             console.error(`[bashlight] ${message}`, cause);
+        }
+    }
+}
+
+/**
+ * Reports a rule that threw while inspecting a command. The engine has already
+ * skipped it (fail-open); this only makes the bug visible to an operator.
+ */
+export class LoggingRuleErrorSink implements RuleErrorSink {
+    constructor(private readonly logger: Logger) {}
+
+    report(failure: RuleFailure): void {
+        try {
+            this.logger.error(
+                `rule '${failure.ruleId}' threw and was skipped`,
+                failure.error,
+            );
+        } catch {
+            // A broken logger must not break a command either.
         }
     }
 }

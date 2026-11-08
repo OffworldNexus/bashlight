@@ -1,8 +1,17 @@
 # Monitoring
 
 bashlight hides itself from the agent, not from you. Everything it does is written to an
-audit log, and four CLI commands turn that log — and the installation — into something
-you can read.
+audit log, and a small CLI turns that log — and the installation — into something you
+can read.
+
+Install the alias first, so every example below is copy-pasteable:
+
+```bash
+alias bashlight='bunx --package github:OffworldNexus/bashlight bashlight'
+```
+
+After the npm release, `bunx bashlight` is enough. Every command that reads the log
+accepts `--log PATH` for a non-default file.
 
 ## The audit log
 
@@ -31,33 +40,28 @@ when rewritten), the `message` (when blocked), and the `ruleIds` and `reasons` b
 the verdict. The log is append-only and **grows without bound** — rotate or truncate it
 when it gets large, for example with `logrotate`.
 
-## The CLI
-
-Run it with `bun bin/bashlight` from the checkout (or `bun run cli`). Every command that
-reads the log accepts `--log PATH` for a non-default file.
-
-### `bashlight watch`
+## `bashlight watch`
 
 Prints the current tail — the last 20 entries, or everything inside `--since` — then
 follows the file, one block per entry. `--all` also shows unchanged commands (hidden by
 default), `--no-color` drops the colour, and Ctrl-C exits.
 
 ```console
-$ bun bin/bashlight watch --since 10m
+$ bashlight watch --since 10m
 2026-11-08 15:12:04  ses_1234  ~/dev/shop
   - pip install requests
   + poetry add requests
   rules: pip-to-manager  reasons: install with the project manager
 ```
 
-### `bashlight stats`
+## `bashlight stats`
 
 Summarises the log over a window (default `7d`): totals, per-rule counts, per-day
 outcomes, the most common rewrite pairs and the busiest directories. `--json` prints the
 same data as an object.
 
 ```console
-$ bun bin/bashlight stats --since 7d
+$ bashlight stats --since 7d
 Audit log: /home/user/.local/share/bashlight/audit.jsonl
 Window: last 7d
 
@@ -84,15 +88,16 @@ Top working directories:
      9  ~/dev/blog
 ```
 
-### `bashlight explain`
+## `bashlight explain`
 
 Dry-runs one command through the real pipeline with the real filesystem and your current
-environment, without executing anything. The command is one quoted argument, the
-remaining arguments joined with spaces, or `-` to read it from stdin. `--cwd DIR` is the
-directory to interpret in, `--env-file F` overlays a `.env`-style file.
+environment — including [your own rules](rules.md#your-own-rules) — without executing
+anything. The command is one quoted argument, the remaining arguments joined with
+spaces, or `-` to read it from stdin. `--cwd DIR` is the directory to interpret in (and
+the project whose rules apply), `--env-file F` overlays a `.env`-style file.
 
 ```console
-$ bun bin/bashlight explain 'pip install requests' --cwd ~/dev/shop
+$ bashlight explain 'pip install requests' --cwd ~/dev/shop
 rewritten:
   - pip install requests
   + poetry add requests
@@ -101,31 +106,51 @@ changes:
       pip install requests → poetry add requests
 ```
 
-### `bashlight doctor`
+## `bashlight rules`
 
-Diagnoses the whole installation: the runtime versions, whether the plugin is
-discoverable, the audit log, and an end-to-end self-test of the pipeline.
+Lists the rules in effect, in priority order: your custom rules first (with the file
+they came from), then the built-ins, plus any you disabled and any file that failed to
+load. It is the fastest way to see why a rule never fires.
 
 ```console
-$ bun bin/bashlight doctor
+$ bashlight rules --cwd ~/dev/shop
+bashlight rules in /home/user/dev/shop
+
+Active:
+   1  make-test         project  /home/user/dev/shop/.opencode/bashlight/rules/make-test.ts
+   2  redundant-runner  builtin
+   3  pip-to-manager    builtin
+   …
+```
+
+## `bashlight doctor`
+
+Diagnoses the whole installation: the runtime versions, whether the plugin is
+discoverable, the custom rules, the audit log, and an end-to-end self-test of the
+pipeline.
+
+```console
+$ bashlight doctor
 ✓ bun 1.3.14
 ✓ opencode opencode v2.2.5
-✓ plugin discoverability (project: /home/user/dev/shop/.opencode/plugins/bashlight.ts)
+✓ plugin discoverability (config: /home/user/.config/opencode/opencode.json)
+✓ custom rules
 ✓ audit log /home/user/.local/share/bashlight/audit.jsonl (2103 bytes, last entry 2026-11-08T15:12:04.117Z)
 ✓ self-test: pip install requests → poetry add requests
 ```
 
 ## Troubleshooting
 
-| Symptom                                             | Fix                                                                                                                                                                                                                                                  |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nothing is ever rewritten                           | the plugin is not loaded. Run `bashlight doctor`; if it fails discoverability, add the [plugin file](getting-started.md#2-point-opencode-at-it). Otherwise check OpenCode's own log under `~/.local/share/opencode/log/` for `failed to load plugin` |
-| `doctor` warns that the audit log is idle           | no shell call has gone through in the last day. Confirm the plugin is enabled, then run one command and check again                                                                                                                                  |
-| A rule changes something it should not              | list its id in [`disabledRules`](getting-started.md#options), or leave it out of your own `rules` set                                                                                                                                                |
-| The audit log is huge                               | it is append-only by design: rotate or truncate it. `bashlight watch` and `stats` cope with a rotated file                                                                                                                                           |
-| You want to know what it would do before it does it | `bashlight explain '<command>' --cwd <dir>` — same code, no execution                                                                                                                                                                                |
+| Symptom                                             | Fix                                                                                                                                                                                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Nothing is ever rewritten                           | the plugin is not loaded. Run `bashlight doctor`; if it fails discoverability, add the [one line](getting-started.md#1-add-bashlight-to-opencodejson). Otherwise check OpenCode's log under `~/.local/share/opencode/log/` for `failed to load plugin` |
+| `doctor` warns that the audit log is idle           | no shell call has gone through in the last day. Confirm the plugin is enabled, then run one command and check again                                                                                                                                    |
+| A rule changes something it should not              | list its id in [`disabledRules`](getting-started.md#options)                                                                                                                                                                                           |
+| A custom rule never fires                           | `bashlight rules` shows it (or the load error) and `bashlight explain` shows the rewrite; a rule file has no runtime import of bashlight, only the `helpers` it is handed                                                                              |
+| The audit log is huge                               | it is append-only by design: rotate or truncate it. `bashlight watch` and `stats` cope with a rotated file                                                                                                                                             |
+| You want to know what it would do before it does it | `bashlight explain '<command>' --cwd <dir>` — same code, no execution                                                                                                                                                                                  |
 
 ## Where next
 
 - [How it works](how-it-works.md) — the pipeline the CLI dry-runs.
-- [Rules](rules.md) — what the ids in the log mean.
+- [Rules](rules.md) — what the ids in the log mean, and how to write your own.

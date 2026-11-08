@@ -1,6 +1,10 @@
 /** bashlight's public API: the processor factory and the rule contract. */
 
-export { type BashlightOptions, createBashlight } from "./bashlight.ts";
+export {
+    type BashlightOptions,
+    createBashlight,
+    type RuleProvider,
+} from "./bashlight.ts";
 export type { EnvironmentView, Host, VariableState } from "./interp/context.ts";
 export type { Change, CommandProcessor, Outcome, ProcessRequest } from "./outcome.ts";
 export {
@@ -15,6 +19,19 @@ export {
     type ScriptInspector,
 } from "./project/index.ts";
 export { createBuiltinRules } from "./rules/builtin/index.ts";
+export {
+    type CatalogReport,
+    type CatalogRule,
+    createRuleHelpers,
+    type RuleAccess,
+    RuleDirectories,
+    type RuleDirectory,
+    type RuleFactory,
+    type RuleHelpers,
+    type RuleLoadError,
+    type RuleModuleExport,
+    type RuleSource,
+} from "./rules/custom/index.ts";
 export type {
     ArgOrigin,
     CallArg,

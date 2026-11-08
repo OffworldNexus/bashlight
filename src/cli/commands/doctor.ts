@@ -1,4 +1,3 @@
-/* eslint-disable sonarjs/function-return-type */
 /**
  * `bashlight doctor` — diagnose the plugin installation.
  *
@@ -9,18 +8,19 @@
 
 import {
     AuditLogReader,
+    configDirectory,
     defaultAuditLogPath,
-    homeDirectory,
 } from "../../opencode/audit-log.ts";
 import type { Outcome } from "../../outcome.ts";
 import { MemoryFileSystem } from "../../project/index.ts";
-import { isRecord } from "../../shared/guards.ts";
-import { dirname, join } from "../../shared/posix-path.ts";
+import type { CatalogReport } from "../../rules/custom/index.ts";
+import { dirname } from "../../shared/posix-path.ts";
 import type { FlagSpec } from "../argv.ts";
 import { parseArgv } from "../argv.ts";
 import { type CliCommand, printCommandHelp, usageError } from "../command.ts";
 import type { CliFiles } from "../files.ts";
 import type { CommandIo } from "../io.ts";
+import { discoverPlugin, INSTALL_SNIPPET } from "../plugin-discovery.ts";
 
 const SPEC: readonly FlagSpec[] = [
     { name: "project", value: true },
@@ -39,19 +39,16 @@ interface Check {
     readonly hint?: string;
 }
 
-/** Where the plugin's own entry point is re-exported from. */
-const PLUGIN_REFERENCE = "opencode/plugin";
-
 export class DoctorCommand implements CliCommand {
     readonly name = "doctor";
     readonly summary = "diagnose the plugin installation";
     readonly usage = "doctor [--project DIR] [--log PATH]";
 
     run(args: readonly string[], io: CommandIo): Promise<number> {
-        return Promise.resolve(this.execute(args, io));
+        return this.execute(args, io);
     }
 
-    private execute(args: readonly string[], io: CommandIo): number {
+    private async execute(args: readonly string[], io: CommandIo): Promise<number> {
         const parsed = parseArgv(args, SPEC);
         if (!parsed.ok) {
             return usageError(this, parsed.error, io);
@@ -62,11 +59,12 @@ export class DoctorCommand implements CliCommand {
         }
         const project = parsed.flags.value("project") ?? io.cwd;
         const log = parsed.flags.value("log") ?? defaultAuditLogPath(io.env);
-        const home = homeDirectory(io.env);
+        await io.ruleAccess.prepare(project);
         const checks: Check[] = [
             checkBun(io),
             checkOpencode(io),
-            checkPlugin(io.files, project, home),
+            checkPlugin(io.files, project, configDirectory(io.env)),
+            checkCustomRules(io.ruleAccess.report(project)),
             ...checkAuditLog(io, log),
             checkSelfTest(io),
         ];
@@ -95,29 +93,30 @@ function checkOpencode(io: CommandIo): Check {
           };
 }
 
-function checkPlugin(files: CliFiles, project: string, home: string): Check {
-    const local = findBashlightPlugin(files, join(project, ".opencode", "plugins"));
-    const global = findBashlightPlugin(
-        files,
-        join(home, ".config", "opencode", "plugins"),
-    );
-    const config = [
-        join(home, ".config", "opencode", "opencode.json"),
-        join(home, ".config", "opencode", "opencode.jsonc"),
-    ].find((path) => configMentions(files.readText(path)));
-    const detail = [
-        local === undefined ? undefined : `project: ${local}`,
-        global === undefined ? undefined : `global: ${global}`,
-        config === undefined ? undefined : `config: ${config}`,
-    ].filter((part): part is string => part !== undefined);
-    if (detail.length === 0) {
+function checkPlugin(files: CliFiles, project: string, configDir: string): Check {
+    const discovery = discoverPlugin(files, project, configDir);
+    if (!discovery.found) {
         return {
             severity: "fail",
             label: "plugin discoverability",
-            hint: `add ${join(project, ".opencode", "plugins", "bashlight.ts")} re-exporting the plugin, or a 'plugins' entry in ~/.config/opencode/opencode.json`,
+            hint: `add to opencode.json:\n    ${INSTALL_SNIPPET}`,
         };
     }
-    return { severity: "pass", label: `plugin discoverability (${detail.join("; ")})` };
+    return {
+        severity: "pass",
+        label: `plugin discoverability (${discovery.details.join("; ")})`,
+    };
+}
+
+/** Reports rule files the catalog could not load (warn: fail-open). */
+function checkCustomRules(report: CatalogReport): Check {
+    if (report.errors.length === 0) {
+        return { severity: "pass", label: "custom rules" };
+    }
+    const hint = report.errors
+        .map((error) => `${error.path}: ${error.message}`)
+        .join("; ");
+    return { severity: "warn", label: "custom rules", hint };
 }
 
 function checkAuditLog(io: CommandIo, path: string): readonly Check[] {
@@ -185,44 +184,6 @@ version = "0.0.0"
         label: "self-test",
         hint: `expected 'poetry add requests', got ${describe(outcome)}`,
     };
-}
-
-/** A `.ts`/`.js` file in `dir` that likely re-exports the plugin. */
-function findBashlightPlugin(files: CliFiles, dir: string): string | undefined {
-    for (const name of files.list(dir)) {
-        if (!name.endsWith(".ts") && !name.endsWith(".js")) {
-            continue;
-        }
-        const path = join(dir, name);
-        const text = files.readText(path);
-        const mentions =
-            name.toLowerCase().includes("bashlight") ||
-            (text !== undefined &&
-                (text.includes("bashlight") || text.includes(PLUGIN_REFERENCE)));
-        if (mentions) {
-            return path;
-        }
-    }
-    return undefined;
-}
-
-/** Whether an opencode config names bashlight, parsed leniently (jsonc-safe). */
-function configMentions(text: string | undefined): boolean {
-    if (text === undefined || !text.includes("bashlight")) {
-        return false;
-    }
-    try {
-        const parsed: unknown = JSON.parse(text);
-        if (isRecord(parsed)) {
-            const plugins = parsed["plugins"] ?? parsed["plugin"];
-            return (
-                plugins === undefined || JSON.stringify(plugins).includes("bashlight")
-            );
-        }
-    } catch {
-        // A jsonc file we cannot parse still counts when it names bashlight.
-    }
-    return true;
 }
 
 const SYMBOLS: Readonly<Record<Severity, string>> = {

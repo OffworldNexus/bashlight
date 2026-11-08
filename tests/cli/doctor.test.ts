@@ -2,7 +2,14 @@ import { describe, expect, test } from "bun:test";
 
 import { DoctorCommand } from "../../src/cli/commands/doctor.ts";
 import type { CommandIo } from "../../src/cli/io.ts";
-import { auditLine, FakeCliFiles, outputOf, StaticRunner, testIo } from "./fakes.ts";
+import {
+    auditLine,
+    FakeCliFiles,
+    FakeRuleAccess,
+    outputOf,
+    StaticRunner,
+    testIo,
+} from "./fakes.ts";
 
 const PLUGIN = 'export { default } from "../../src/opencode/plugin.ts";\n';
 
@@ -63,7 +70,7 @@ describe("doctor", () => {
         const text = outputOf(io).text();
         expect(code).toBe(1);
         expect(text).toContain("✗ plugin discoverability");
-        expect(text).toContain("bashlight.ts");
+        expect(text).toContain('"plugins": ["github:OffworldNexus/bashlight"]');
     });
 
     test("fails when bun is missing", async () => {
@@ -143,5 +150,63 @@ describe("doctor", () => {
         const text = outputOf(io).text();
         expect(code).toBe(0);
         expect(text).toContain("config: /home/u/.config/opencode/opencode.json");
+    });
+
+    test.each([
+        ["github:OffworldNexus/bashlight"],
+        ["github:OffworldNexus/bashlight#develop"],
+        ["git+https://github.com/OffworldNexus/bashlight.git"],
+    ])("recognises the package entry %s", async (spec) => {
+        const io = doctorIo({
+            files: new FakeCliFiles({
+                "/w/opencode.json": `{"plugins": ["${spec}"]}`,
+                "/w/audit.jsonl": auditLine(),
+            }),
+            runner: runner(true, true),
+        });
+        const code = await new DoctorCommand().run(
+            ["--project", "/w", "--log", "/w/audit.jsonl"],
+            io,
+        );
+        expect(code).toBe(0);
+        expect(outputOf(io).text()).toContain("config: /w/opencode.json");
+    });
+
+    test("recognises the { package, options } form and the plugin key", async () => {
+        const io = doctorIo({
+            files: new FakeCliFiles({
+                "/w/.opencode/opencode.json":
+                    '{"plugin": [{"package": "bashlight", "options": {}}]}',
+                "/w/audit.jsonl": auditLine(),
+            }),
+            runner: runner(true, true),
+        });
+        const code = await new DoctorCommand().run(
+            ["--project", "/w", "--log", "/w/audit.jsonl"],
+            io,
+        );
+        expect(code).toBe(0);
+        expect(outputOf(io).text()).toContain("config: /w/.opencode/opencode.json");
+    });
+
+    test("warns about custom rule files that failed to load", async () => {
+        const io = doctorIo({
+            files: projectLayout({ "/w/audit.jsonl": auditLine() }),
+            runner: runner(true, true),
+            ruleAccess: new FakeRuleAccess({
+                rules: [],
+                errors: [
+                    { path: "/w/.opencode/bashlight/rules/bad.ts", message: "boom" },
+                ],
+            }),
+        });
+        const code = await new DoctorCommand().run(
+            ["--project", "/w", "--log", "/w/audit.jsonl"],
+            io,
+        );
+        const text = outputOf(io).text();
+        expect(code).toBe(0);
+        expect(text).toContain("⚠ custom rules");
+        expect(text).toContain("/w/.opencode/bashlight/rules/bad.ts: boom");
     });
 });

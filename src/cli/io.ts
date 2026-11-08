@@ -6,6 +6,8 @@
 
 import type { CommandProcessor } from "../outcome.ts";
 import type { FileSystem } from "../project/index.ts";
+import type { RuleAccess } from "../rules/custom/index.ts";
+import type { Rule } from "../rules/rule.ts";
 import type { Clock } from "./clock.ts";
 import type { CliFiles } from "./files.ts";
 import type { Output } from "./output.ts";
@@ -30,6 +32,14 @@ export interface CommandIo {
     readonly readStdin: () => Promise<string>;
     /** Aborted on Ctrl-C / SIGTERM, so follow loops stop cleanly. */
     readonly signal: AbortSignal;
-    /** Builds a processor over a file system (real, or a MemoryFileSystem). */
-    readonly processorFactory: (fileSystem: FileSystem) => CommandProcessor;
+    /**
+     * Builds a processor over a file system; when `rules` is given the engine
+     * uses them, otherwise the built-ins.
+     */
+    readonly processorFactory: (
+        fileSystem: FileSystem,
+        rules?: readonly Rule[],
+    ) => CommandProcessor;
+    /** The custom-rule catalog, shared by `explain`, `rules` and `doctor`. */
+    readonly ruleAccess: RuleAccess;
 }

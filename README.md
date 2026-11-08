@@ -1,17 +1,25 @@
 # bashlight
 
-**The agent thinks it ran its command. bashlight made it run the right one.**
+**bashlight gaslights your coding agent.** It sits between an LLM and the shell and
+silently rewrites the bash the agent runs so it matches the project's conventions. The
+agent keeps seeing its own command; the project gets the right one. It is deliberate and
+benign: the agent ends up doing what it meant, the way the project wants.
 
-bashlight gaslights coding agents, starting with bash. It sits between an LLM agent and
-the shell and silently rewrites the bash the agent runs to match the project's
-conventions. When an agent runs `pip install requests` in a Poetry project, bashlight
-turns the call into `poetry add requests` and lets the agent believe that is what it did
-— no instructions in the prompt, no denials, no retries. It never executes anything to
-decide: it parses the command, pre-interprets it statically (variables, `cd`, `bash -c`,
-ssh, wrappers…), runs a set of rules on every command that would execute, edits the
-source minimally, and re-interprets the result to prove the edit did exactly what it
-meant. When anything is uncertain, it fails open and the original command runs
-untouched.
+## The idea, in four steps
+
+1. **Detect the intent** of the LLM's tool call — what it is trying to do: install a
+   dependency, run the tests, run a script…
+2. **Figure out how to actually do it for the project at hand** — its package manager,
+   runner, virtualenv, conventions — read from the working directory at that exact
+   command.
+3. **Fix the call** — rewrite the command minimally, re-parse it to prove the edit did
+   exactly what it meant, and fail open when unsure.
+4. **Make the LLM believe it was its own idea** — the agent keeps seeing its original
+   command in its history. No instructions in the prompt, no denials, no retries.
+
+Nothing is executed to decide: bashlight parses the command, pre-interprets it
+statically (variables, `cd`, `bash -c`, ssh, wrappers…) and finds every command that
+would run. When anything is uncertain, the original command runs untouched.
 
 ## Before → after
 
@@ -28,44 +36,44 @@ untouched.
 
 ## Install
 
-1. Clone it and install the one runtime dependency:
+bashlight is **unreleased**; install it from GitHub for now. Add it to the `plugins`
+array of `opencode.json` — the project's, or `~/.config/opencode/opencode.json` to
+enable it everywhere:
 
-    ```console
-    $ git clone https://github.com/OffworldNexus/bashlight ~/dev/bashlight
-    $ cd ~/dev/bashlight && bun install
-    ```
+```json
+{
+    "plugins": ["github:OffworldNexus/bashlight"]
+}
+```
 
-2. Point OpenCode at the plugin. Drop a one-line file into the project (or into
-   `~/.config/opencode/plugins/` to enable it everywhere), with the absolute path to the
-   checkout:
+Restart OpenCode. That is all: no clone, no `bun install`, no plugin file to write. Once
+it is published to npm, the entry becomes `"plugins": ["bashlight"]`.
 
-    ```ts title=".opencode/plugins/bashlight.ts"
-    export { default } from "/home/user/dev/bashlight/src/opencode/plugin.ts";
-    ```
+## Try it before trusting it
 
-3. Check it is live:
-
-    ```console
-    $ bun bin/bashlight doctor
-    ```
-
-## Keep an eye on it
-
-bashlight hides itself from the agent, not from you. A small CLI reads the audit log it
-writes and dry-runs the pipeline:
-
-- `watch` — follow the audit log in real time, one block per rewrite.
-- `stats` — totals, per-rule counts and the most common rewrites over a window.
-- `explain` — dry-run one command and show exactly what would run.
-- `doctor` — check the runtime, the plugin and the pipeline end to end.
+The CLI runs the same pipeline as the plugin and reads the audit log it writes. Run it
+without installing anything:
 
 ```console
-$ bun bin/bashlight watch --since 10m
-2026-11-08 15:12:04  ses_1234  ~/dev/shop
+$ bunx --package github:OffworldNexus/bashlight bashlight doctor
+```
+
+Or make it a command:
+
+```console
+$ alias bashlight='bunx --package github:OffworldNexus/bashlight bashlight'
+$ bashlight explain 'pip install requests' --cwd ~/dev/shop
+rewritten:
   - pip install requests
   + poetry add requests
-  rules: pip-to-manager  reasons: install with the project manager
+changes:
+  - rules: pip-to-manager  reasons: install with the project manager
+      pip install requests → poetry add requests
 ```
+
+`watch` follows the audit log in real time, `stats` summarises it, `rules` lists the
+rules in effect (built-in and yours), `doctor` checks the whole installation. After the
+npm release, `bunx bashlight doctor` is enough.
 
 ## Documentation
 
@@ -77,16 +85,23 @@ $ bun bin/bashlight watch --since 10m
 [Monitoring](https://offworldnexus.github.io/bashlight/monitoring/) ·
 [Benchmark](https://offworldnexus.github.io/bashlight/benchmark/)
 
-## Development
+## Contributing
+
+You only need a checkout to work _on_ bashlight.
 
 ```console
+$ git clone https://github.com/OffworldNexus/bashlight ~/dev/bashlight
+$ cd ~/dev/bashlight && bun install
 $ make clean   # prettier + eslint + tsc
 $ bun test     # the test suite
 ```
 
-`tests/cases/` holds hand-written end-to-end examples; `corpus/` is an optional, private
-git submodule of anonymized real commands. The corpus tests are skipped when the
-submodule is absent, as on CI, so `bun test` works on a bare clone.
+This repo enables the working tree for itself through the one-line
+`.opencode/plugins/bashlight.ts` re-export — a contributor convenience, not the install
+story. `tests/cases/` holds hand-written end-to-end examples; `corpus/` is an optional,
+private git submodule of anonymized real commands and its tests are skipped when it is
+absent, so `bun test` works on a bare clone. See
+[docs/contributing.md](docs/contributing.md) for the release checklist.
 
 ## License
 

@@ -1,9 +1,24 @@
 # How it works
 
+**bashlight gaslights your coding agent.** It detects the intent of the agent's shell
+call, works out how the project at hand would really do that, fixes the call, and lets
+the agent believe the command it sees in its history is its own. This page is the tour.
+
+The idea is four steps:
+
+1. **Detect the intent** of the LLM's tool call — what it is trying to do: install a
+   dependency, run the tests, run a script…
+2. **Figure out how to actually do it for the project at hand** — its package manager,
+   runner, virtualenv, conventions — read from the working directory at that exact
+   command.
+3. **Fix the call** — rewrite the command minimally, re-parse it to prove the edit did
+   exactly what it meant, and fail open when unsure.
+4. **Make the LLM believe it was its own idea** — the agent keeps seeing its original
+   command in its history. No instructions in the prompt, no denials, no retries.
+
 bashlight never runs a command to understand it. Everything below happens on the command
 string, before anything is executed. The full contract is in
-[`DESIGN.md`](https://github.com/OffworldNexus/bashlight/blob/develop/DESIGN.md); this
-page is the tour.
+[`DESIGN.md`](https://github.com/OffworldNexus/bashlight/blob/develop/DESIGN.md).
 
 ## The pipeline
 
@@ -162,5 +177,5 @@ ssh example.com 'cd /srv/app && python manage.py check'
 
 ## Keep reading
 
-- [Rules](rules.md) — the five built-in rules and the extension point.
+- [Rules](rules.md) — the five built-in rules, and how to add your own without a clone.
 - [Monitoring](monitoring.md) — the audit log and the CLI.

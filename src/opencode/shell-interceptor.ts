@@ -24,6 +24,11 @@ export interface ShellInterceptorDeps {
     readonly env: () => Readonly<Record<string, string>>;
     /** The absolute directory the session runs in, cached by the caller. */
     readonly directoryFor: (sessionID: string) => Promise<string> | string;
+    /**
+     * Loads the custom rules for a project directory before processing. It may
+     * reject; the failure is logged and the command still runs.
+     */
+    readonly prepareRules?: (directory: string) => Promise<void>;
 }
 
 /** The deliberate, propagating rejection produced by a `block` verdict. */
@@ -43,10 +48,12 @@ export class ShellInterceptor {
             }
             const directory = await this.deps.directoryFor(call.sessionID);
             const cwd = resolveCwd(directory, call.workdir);
+            await this.prepare(directory);
             const outcome = this.deps.processor.process({
                 command: call.command,
                 cwd,
                 env: this.deps.env(),
+                projectDir: directory,
             });
             this.recordQuietly(auditEntry(call, cwd, outcome));
             this.apply(call, outcome);
@@ -55,6 +62,18 @@ export class ShellInterceptor {
                 throw error;
             }
             this.log("bashlight failed; the command runs unchanged", error);
+        }
+    }
+
+    /** Loads the per-directory rules; a failure is logged, never fatal. */
+    private async prepare(directory: string): Promise<void> {
+        if (this.deps.prepareRules === undefined) {
+            return;
+        }
+        try {
+            await this.deps.prepareRules(directory);
+        } catch (error) {
+            this.log("could not load the custom rules; using the built-ins", error);
         }
     }
 

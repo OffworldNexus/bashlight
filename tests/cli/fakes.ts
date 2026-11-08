@@ -9,6 +9,9 @@ import type { CommandIo } from "../../src/cli/io.ts";
 import type { Output } from "../../src/cli/output.ts";
 import type { ProcessRunner, RunResult } from "../../src/cli/process-runner.ts";
 import type { Scheduler } from "../../src/cli/scheduler.ts";
+import { createBuiltinRules } from "../../src/rules/builtin/index.ts";
+import type { CatalogReport, RuleAccess } from "../../src/rules/custom/index.ts";
+import type { Rule } from "../../src/rules/rule.ts";
 
 /** An `Output` that keeps every line it was asked to write. */
 export class FakeOutput implements Output {
@@ -132,6 +135,23 @@ export class FakeCliFiles implements CliFiles {
     }
 }
 
+/** A `RuleAccess` with the built-ins alone; tests override it when needed. */
+export class FakeRuleAccess implements RuleAccess {
+    constructor(private readonly snapshot: CatalogReport = { rules: [], errors: [] }) {}
+
+    prepare(): Promise<void> {
+        return Promise.resolve();
+    }
+
+    rulesFor(): readonly Rule[] {
+        return createBuiltinRules();
+    }
+
+    report(): CatalogReport {
+        return this.snapshot;
+    }
+}
+
 /** Builds a `CommandIo` with fakes; every field can be overridden. */
 export function testIo(overrides: Partial<CommandIo> = {}): CommandIo {
     const files = overrides.files ?? new NodeCliFiles();
@@ -146,7 +166,12 @@ export function testIo(overrides: Partial<CommandIo> = {}): CommandIo {
         cwd: "/w",
         readStdin: () => Promise.resolve(""),
         signal: new AbortController().signal,
-        processorFactory: (fileSystem) => createBashlight({ fileSystem }),
+        processorFactory: (fileSystem, rules) =>
+            createBashlight({
+                fileSystem,
+                ...(rules === undefined ? {} : { rules }),
+            }),
+        ruleAccess: overrides.ruleAccess ?? new FakeRuleAccess(),
         ...overrides,
     };
 }

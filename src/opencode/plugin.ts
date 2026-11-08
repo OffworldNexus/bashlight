@@ -5,6 +5,10 @@
  * `NodeFileSystem`, picks the audit sink and wires the session-directory cache.
  * Everything below it is injected, so the interceptor is tested with fakes.
  *
+ * `@opencode/plugin` is imported type-only: the plugin is packaged with no
+ * runtime dependencies, and OpenCode's loader accepts a plain
+ * `{ id, setup }` default export.
+ *
  * Options (from `plugins: [{ package, options }]`):
  *   - `auditLog`: a file path, or `false` to disable auditing. Defaults to
  *     `$XDG_DATA_HOME/bashlight/audit.jsonl`, falling back to
@@ -12,18 +16,27 @@
  *   - `disabledRules`: rule ids the core should not apply.
  */
 
-import { Plugin, type PluginOptions } from "@opencode/plugin";
+import type { Plugin, PluginOptions } from "@opencode/plugin";
 
 import { createBashlight } from "../bashlight.ts";
 import { NodeFileSystem } from "../project/index.ts";
 import {
+    createRuleHelpers,
+    RuleCatalog,
+    RuleDirectories,
+    RuleModuleLoader,
+} from "../rules/custom/index.ts";
+import {
     type AuditLog,
+    configDirectory,
     defaultAuditLogPath,
     type Environment,
     JsonlAuditLog,
     NoopAuditLog,
 } from "./audit-log.ts";
-import { ConsoleLogger, type Logger } from "./logger.ts";
+import { ConsoleLogger, type Logger, LoggingRuleErrorSink } from "./logger.ts";
+import { NodeRuleDirectoryReader } from "./rule-directory-reader.ts";
+import { FileRuleModuleImporter } from "./rule-module-importer.ts";
 import { SessionDirectoryCache } from "./session-directory-cache.ts";
 import { ShellInterceptor } from "./shell-interceptor.ts";
 
@@ -91,19 +104,40 @@ function createDirectoryResolver(
     return (sessionID) => cache.directoryFor(sessionID);
 }
 
+/** Builds the catalog that resolves custom rule files for a session. */
+function createRuleCatalog(
+    env: Environment,
+    options: BashlightPluginOptions,
+    logger: Logger,
+): RuleCatalog {
+    return new RuleCatalog({
+        directories: new RuleDirectories(configDirectory(env)),
+        reader: new NodeRuleDirectoryReader(),
+        loader: new RuleModuleLoader({
+            importer: new FileRuleModuleImporter(),
+            helpers: createRuleHelpers(),
+        }),
+        reporter: logger,
+        disabledRules: options.disabledRules,
+    });
+}
+
 /** Registers the shell interceptor and returns the plugin cleanup. */
 export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
     const options = readOptions(ctx.options, process.env);
     const logger = new ConsoleLogger();
+    const catalog = createRuleCatalog(process.env, options, logger);
     const interceptor = new ShellInterceptor({
         processor: createBashlight({
             fileSystem: new NodeFileSystem(),
-            disabledRules: options.disabledRules,
+            rulesFor: (directory) => catalog.rulesFor(directory),
+            ruleErrors: new LoggingRuleErrorSink(logger),
         }),
         auditLog: createAuditLog(options.auditLog, logger),
         logger,
         env: currentEnv,
         directoryFor: createDirectoryResolver(ctx, logger),
+        prepareRules: (directory) => catalog.prepare(directory),
     });
 
     const registration = await ctx.tool.hook("execute.before", (event) =>
@@ -114,4 +148,13 @@ export async function setup(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
     };
 }
 
-export default Plugin.define({ id: "bashlight", setup });
+/** The OpenCode v2 promise plugin shape (`{ id, setup }`). */
+type PluginDefinition = {
+    readonly id: string;
+    readonly setup: (ctx: Plugin.Context) => Promise<Plugin.Cleanup>;
+};
+
+export default {
+    id: "bashlight",
+    setup,
+} satisfies PluginDefinition;

@@ -47,8 +47,9 @@ export class ExplainCommand implements CliCommand {
         }
         const cwd = resolve(io.cwd, parsed.flags.value("cwd") ?? ".") ?? io.cwd;
         const colors = io.output.colors && !parsed.flags.bool("no-color");
+        await io.ruleAccess.prepare(cwd);
         const outcome = io
-            .processorFactory(io.fileSystem)
+            .processorFactory(io.fileSystem, io.ruleAccess.rulesFor(cwd))
             .process({ command, cwd, env });
         for (const line of render(outcome, command, colors)) {
             io.output.line(line);

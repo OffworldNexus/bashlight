@@ -40,6 +40,7 @@ function context(overrides: Partial<RuleContext> = {}): RuleContext {
         host: LOCAL_HOST,
         project: createProjectInspector(fs),
         scripts: createScriptInspector(fs),
+        files: fs,
         ...overrides,
     };
 }

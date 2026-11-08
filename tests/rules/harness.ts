@@ -156,6 +156,7 @@ export class Harness {
             host: this.host,
             project: createProjectInspector(fs),
             scripts: createScriptInspector(fs),
+            files: fs,
         };
         const engine = new RuleEngine(
             this.injectedRules ?? createBuiltinRules(),

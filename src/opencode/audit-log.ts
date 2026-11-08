@@ -106,6 +106,20 @@ export function defaultAuditLogPath(env: Environment): string {
     return join(base, "bashlight", "audit.jsonl");
 }
 
+/**
+ * The OpenCode config directory: `$XDG_CONFIG_HOME/opencode` or
+ * `~/.config/opencode`. The plugin and the CLI resolve custom rules and the
+ * `opencode.json` they look at from here.
+ */
+export function configDirectory(env: Environment): string {
+    const configHome = env.XDG_CONFIG_HOME;
+    const base =
+        configHome !== undefined && configHome.startsWith("/")
+            ? configHome
+            : join(homeDirectory(env), ".config");
+    return join(base, "opencode");
+}
+
 /** An audit entry as written on disk: the recorded fields plus its timestamp. */
 export interface TimedAuditEntry extends AuditEntry {
     /** ISO 8601 timestamp added by {@link JsonlAuditLog}. */

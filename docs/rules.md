@@ -23,9 +23,10 @@ new argv until nothing changes it, a cycle appears, or eight rounds pass — so
 `poetry run poetry run x → poetry run x` is just two rules agreeing. The first `block`
 wins for the whole command.
 
-The five rules bashlight ships with are in `src/rules/builtin/`. They are tried in this
-priority order — `redundant-runner`, `pip-to-manager`, `bare-python`, `python-runner`,
-`node-manager` — and the first one that does not keep a command decides the round.
+The five rules bashlight ships with are tried in this priority order —
+`redundant-runner`, `pip-to-manager`, `bare-python`, `python-runner`, `node-manager` —
+and the first one that does not keep a command decides the round. Your own rules run
+before all of them (see [Your own rules](#your-own-rules)).
 
 ## `python-runner`
 
@@ -169,59 +170,112 @@ $ npx npx vitest run
 → npx vitest run
 ```
 
-## Write your own rule
+## Your own rules
 
-A rule is an object with a stable `id`, a `scope`, and an `inspect` method. The
-`RuleContext` gives it the working directory at that exact command, the host, and the
-project inspectors — but not arbitrary file reads, so a rule that needs more than "which
-toolchain is here" closes over a `FileSystem` of its own.
+You do not clone bashlight, install it, or write a plugin to add a rule. Drop a
+TypeScript (or JavaScript) file into a `rules` folder and it is picked up:
+
+| Where                                      | Applies to                         |
+| ------------------------------------------ | ---------------------------------- |
+| `<project>/.opencode/bashlight/rules/*.ts` | that project                       |
+| `~/.config/opencode/bashlight/rules/*.ts`  | every project (`$XDG_CONFIG_HOME`) |
+
+The file's **default export** is one of:
+
+- a `Rule` object,
+- a factory `(helpers) => Rule | Rule[]`,
+- an array of either.
+
+The factory receives the `helpers` it needs, so the file has **no runtime import of
+bashlight at all** — the loader hands it the verdict builders (`keep`, `block`,
+`replace`, `arg`, `argsFrom`, `text`, `indexRange`) and the command-line parsers a rule
+author wants (`parsePythonCommand`, `parseNodeCommand`, `isVenvActive`).
 
 Say your team's Python projects all define a `make test` target and you want `pytest` to
-go through it. The rule only needs the command and the working directory:
+go through it. `RuleContext` gives the working directory at that exact command and a
+read-only `files` view, so the rule can check for a `Makefile` without importing
+`node:fs`:
 
-```ts title="make-test.ts"
-import type { Rule, RuleContext, CommandCall, Verdict } from "bashlight";
-import { argsFrom, keep, replace, text } from "bashlight";
-import { NodeFileSystem } from "bashlight";
-
-const files = new NodeFileSystem();
-
-export const makeTest: Rule = {
+```ts title=".opencode/bashlight/rules/make-test.ts"
+export default (helpers) => ({
     id: "make-test",
     scope: "local",
-    inspect(call: CommandCall, context: RuleContext): Verdict {
+    inspect(call, context) {
         if (call.argv[0]?.value !== "pytest" || context.cwd === undefined) {
-            return keep();
+            return helpers.keep();
         }
-        if (!files.exists(`${context.cwd}/Makefile`)) {
-            return keep();
+        if (!context.files.exists(`${context.cwd}/Makefile`)) {
+            return helpers.keep();
         }
-        return replace(
-            [...text("make", "test"), ...argsFrom(call.argv, 1)],
+        return helpers.replace(
+            [...helpers.text("make", "test"), ...helpers.argsFrom(call.argv, 1)],
             "run the project's make target",
         );
     },
-};
-```
-
-`replace` reuses original arguments through `argsFrom` (so quoting and origins survive)
-and introduces new literal words with `text`. The rewriter quotes them according to
-where they land.
-
-Because `createBashlight({ rules })` **replaces** the built-in set, spread the built-ins
-in to keep them:
-
-```ts title="setup.ts"
-import { createBashlight, createBuiltinRules, NodeFileSystem } from "bashlight";
-
-import { makeTest } from "./make-test.ts";
-
-const fileSystem = new NodeFileSystem();
-const processor = createBashlight({
-    fileSystem,
-    rules: [...createBuiltinRules(), makeTest],
 });
 ```
 
-To drop a built-in instead, leave it out of `rules`, or disable it per project with the
-[`disabledRules` option](getting-started.md#options).
+`helpers.replace` reuses original arguments through `helpers.argsFrom` (so quoting and
+origins survive) and introduces new literal words with `helpers.text`; the rewriter
+quotes them according to where they land.
+
+### Try it, then trust it
+
+`bashlight explain` runs your rule through the real pipeline, and `bashlight rules`
+shows which rules loaded and where from:
+
+```console
+$ bashlight explain 'pytest -q' --cwd ~/dev/shop
+rewritten:
+  - pytest -q
+  + make test -q
+changes:
+  - rules: make-test  reasons: run the project's make target
+      pytest -q → make test -q
+
+$ bashlight rules --cwd ~/dev/shop
+bashlight rules in /home/user/dev/shop
+
+Active:
+   1  make-test         project  /home/user/dev/shop/.opencode/bashlight/rules/make-test.ts
+   2  redundant-runner  builtin
+   …
+```
+
+A file that fails to load, or a rule that throws, is skipped and logged (to stderr in
+the plugin); it never breaks the shell call, and `doctor` reports it.
+
+### Reload, precedence and overriding
+
+On the next command, bashlight re-scans both folders and reloads any file whose
+modification time changed — **edit a rule and it takes effect immediately, no OpenCode
+restart**.
+
+- Your rules run **before** the built-ins, and a custom rule with the same `id` as a
+  built-in **replaces** it.
+- `disabledRules` removes any rule, built-in or custom.
+- Custom rules are resolved from the session's project directory; a project rule always
+  wins over a global one with the same `id`.
+
+### Types (optional)
+
+The file above needs no import. If you want type-checking, add bashlight as a dev
+dependency and import the contract type-only — type-only imports are erased at runtime,
+so a missing package never breaks loading:
+
+```ts title=".opencode/bashlight/rules/make-test.ts"
+import type { RuleFactory } from "bashlight";
+
+const makeTest: RuleFactory = (helpers) => ({
+    // …
+});
+
+export default makeTest;
+```
+
+```console
+$ bun add -d github:OffworldNexus/bashlight
+```
+
+To disable a built-in you do not want, list it in
+[`disabledRules`](getting-started.md#options).

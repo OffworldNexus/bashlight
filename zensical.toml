@@ -25,6 +25,7 @@ nav = [
   { "Rules" = "rules.md" },
   { "Monitoring" = "monitoring.md" },
   { "Benchmark" = "benchmark.md" },
+  { "Contributing" = "contributing.md" },
 ]
 
 extra_css = ["stylesheets/extra.css"]

@@ -8,13 +8,24 @@
  */
 
 import { createBashlight } from "../bashlight.ts";
-import type { CommandProcessor } from "../outcome.ts";
+import { configDirectory } from "../opencode/audit-log.ts";
+import { ConsoleLogger } from "../opencode/logger.ts";
+import { NodeRuleDirectoryReader } from "../opencode/rule-directory-reader.ts";
+import { FileRuleModuleImporter } from "../opencode/rule-module-importer.ts";
 import type { FileSystem } from "../project/index.ts";
+import {
+    createRuleHelpers,
+    RuleCatalog,
+    RuleDirectories,
+    RuleModuleLoader,
+} from "../rules/custom/index.ts";
+import type { Rule } from "../rules/rule.ts";
 import { SystemClock } from "./clock.ts";
 import { CommandRegistry, printUsage } from "./command.ts";
 import { DoctorCommand } from "./commands/doctor.ts";
 import { ExplainCommand } from "./commands/explain.ts";
 import { HelpCommand } from "./commands/help.ts";
+import { RulesCommand } from "./commands/rules.ts";
 import { StatsCommand } from "./commands/stats.ts";
 import { WatchCommand } from "./commands/watch.ts";
 import { NodeCliFiles } from "./files.ts";
@@ -29,6 +40,21 @@ export interface IoOptions {
     readonly env?: Readonly<Record<string, string | undefined>>;
     readonly cwd?: string;
     readonly colors?: boolean;
+}
+
+/** Builds the catalog the CLI resolves custom rules through. */
+function createRuleAccess(
+    env: Readonly<Record<string, string | undefined>>,
+): RuleCatalog {
+    return new RuleCatalog({
+        directories: new RuleDirectories(configDirectory(env)),
+        reader: new NodeRuleDirectoryReader(),
+        loader: new RuleModuleLoader({
+            importer: new FileRuleModuleImporter(),
+            helpers: createRuleHelpers(),
+        }),
+        reporter: new ConsoleLogger(),
+    });
 }
 
 /** Builds the production `CommandIo` from the process environment. */
@@ -46,8 +72,12 @@ export function createIo(options: IoOptions): CommandIo {
         cwd: options.cwd ?? process.cwd(),
         readStdin,
         signal: options.signal,
-        processorFactory: (fileSystem: FileSystem): CommandProcessor =>
-            createBashlight({ fileSystem }),
+        processorFactory: (fileSystem: FileSystem, rules?: readonly Rule[]) =>
+            createBashlight({
+                fileSystem,
+                ...(rules === undefined ? {} : { rules }),
+            }),
+        ruleAccess: createRuleAccess(env),
     };
 }
 
@@ -57,6 +87,7 @@ export function createRegistry(): CommandRegistry {
         new WatchCommand(),
         new StatsCommand(),
         new ExplainCommand(),
+        new RulesCommand(),
         new DoctorCommand(),
     ]);
     registry.addAll([new HelpCommand(() => registry.all())]);

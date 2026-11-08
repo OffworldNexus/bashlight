@@ -10,10 +10,16 @@ import type { Interpreter } from "../interp/interpreter.ts";
 import type { Invocation } from "../interp/invocation.ts";
 import type { InitialState } from "../interp/session.ts";
 import type { Change, CommandProcessor, Outcome, ProcessRequest } from "../outcome.ts";
+import type { FileSystem } from "../project/file-system.ts";
 import type { ProjectInspector } from "../project/project-inspector.ts";
 import type { ScriptInspector } from "../project/script-inspector.ts";
-import type { RuleContext } from "../rules/rule.ts";
-import type { Decision, RuleEngine } from "../rules/rule-engine.ts";
+import type { Rule, RuleContext } from "../rules/rule.ts";
+import {
+    type Decision,
+    NoopRuleErrorSink,
+    RuleEngine,
+    type RuleErrorSink,
+} from "../rules/rule-engine.ts";
 import { isSubmitted, toCommandCall } from "./call-builder.ts";
 import { buildExpected } from "./expected.ts";
 import type { RewrittenTarget } from "./rewriter.ts";
@@ -25,16 +31,22 @@ import { validate } from "./validator.ts";
 export interface Inspectors {
     readonly project: ProjectInspector;
     readonly scripts: ScriptInspector;
+    readonly files: FileSystem;
 }
 
 export interface ProcessorDependencies {
     readonly interpreter: Interpreter;
-    readonly engine: RuleEngine;
+    /** The rules in effect for one project directory (custom first). */
+    readonly rulesFor: (directory: string) => readonly Rule[];
     readonly rewriter: Rewriter;
     /** Fresh inspectors for one request; they memoize per request. */
     readonly inspectors: () => Inspectors;
     readonly quoter: ShellQuoter;
+    /** Where rules report unexpected exceptions (fail-open). */
+    readonly ruleErrors?: RuleErrorSink;
 }
+
+const NOOP_ERROR_SINK = new NoopRuleErrorSink();
 
 export class CommandProcessorImpl implements CommandProcessor {
     constructor(private readonly dependencies: ProcessorDependencies) {}
@@ -67,6 +79,7 @@ export class CommandProcessorImpl implements CommandProcessor {
             return { kind: "unchanged", reason: "the command was too large" };
         }
         const inspectors = this.dependencies.inspectors();
+        const engine = this.engineFor(request.projectDir ?? request.cwd);
         const decisions = new Map<Invocation, Decision>();
         const blockedMessages: string[] = [];
         const blockedRuleIds = new Set<string>();
@@ -74,7 +87,7 @@ export class CommandProcessorImpl implements CommandProcessor {
             if (!isSubmitted(invocation)) {
                 continue;
             }
-            const decision = this.dependencies.engine.decide(
+            const decision = engine.decide(
                 toCommandCall(invocation),
                 contextFor(invocation, inspectors),
             );
@@ -133,6 +146,15 @@ export class CommandProcessorImpl implements CommandProcessor {
         };
     }
 
+    /** Builds the engine for this directory's rules (cheap: an array holder). */
+    private engineFor(directory: string): RuleEngine {
+        return new RuleEngine(
+            this.dependencies.rulesFor(directory),
+            {},
+            this.dependencies.ruleErrors ?? NOOP_ERROR_SINK,
+        );
+    }
+
     private change(target: RewrittenTarget): Change {
         const ruleIds: string[] = [];
         const reasons: string[] = [];
@@ -165,6 +187,7 @@ function contextFor(invocation: Invocation, inspectors: Inspectors): RuleContext
         host: invocation.context.host,
         project: inspectors.project,
         scripts: inspectors.scripts,
+        files: inspectors.files,
     };
 }
 
