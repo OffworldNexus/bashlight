@@ -252,6 +252,9 @@ detector, not editing the inspector.
 
 ### rules — the extension point
 
+The canonical definitions are in `src/rules/rule.ts` and `src/interp/context.ts` (the
+sketch below is a summary).
+
 ```ts
 interface Rule {
     readonly id: string;

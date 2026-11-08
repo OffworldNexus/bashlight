@@ -1,0 +1,3 @@
+#!/bin/sh
+# Refuse commits that would leak private terms (see scripts/check-private-terms.ts).
+exec bun scripts/check-private-terms.ts
