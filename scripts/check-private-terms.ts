@@ -6,7 +6,7 @@
  * The script itself must never contain any of them. Used as a git pre-commit
  * hook: `ln -s ../../scripts/pre-commit .git/hooks/pre-commit`.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -63,7 +63,7 @@ function main(): number {
     }
     const checker = new PrivateTermChecker(loadTerms(termsPath));
     const findings = gitFiles(process.argv.slice(2).some((arg) => arg === "--all"))
-        .filter((path) => existsSync(path))
+        .filter((path) => existsSync(path) && statSync(path).isFile())
         .flatMap((path) => checker.findings(path, readFileSync(path, "utf8")));
     for (const finding of findings) {
         console.error(finding);
