@@ -19,5 +19,5 @@
         "noUnusedParameters": true,
         "exactOptionalPropertyTypes": true
     },
-    "include": ["src", "tests", "scripts", "eslint.config.js"]
+    "include": ["src", "tests", "scripts", "eslint.config.js", ".opencode/plugins"]
 }

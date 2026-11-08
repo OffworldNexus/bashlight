@@ -1,0 +1,203 @@
+/* eslint-disable sonarjs/function-return-type, sonarjs/cognitive-complexity */
+/**
+ * Strategy 2: folding a change to every use of a variable back into the
+ * assignment that produced its value (`P="poetry run python"` instead of
+ * inserting the runner before each `$P`).
+ *
+ * A use qualifies only when the variable's value can be reconstructed from the
+ * replacement items that cover the use, when unquoted field splitting of the
+ * new value reproduces those items exactly, and when *every* use of the binding
+ * agrees on the same new value.
+ */
+
+import type { Binding } from "../interp/binding.ts";
+import type { ScriptDocument } from "../interp/documents.ts";
+import { type Arg, soleBinding } from "../interp/values.ts";
+import type { Assignment, Word, WordPart } from "../syntax/index.ts";
+import type { ShellQuoter } from "./shell-quoter.ts";
+
+export type ValueStyle = "single" | "double" | "bare";
+
+export interface BindingWord {
+    readonly binding: Binding;
+    readonly word: Word;
+    readonly fieldIndices: readonly number[];
+}
+
+/** Every word of `args` that is one whole unquoted `$NAME`/`${NAME}` expansion. */
+export function bindingWords(args: readonly Arg[]): BindingWord[] {
+    const seen = new Set<unknown>();
+    const out: BindingWord[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index];
+        if (arg === undefined || seen.has(arg.word)) {
+            continue;
+        }
+        seen.add(arg.word);
+        const candidate = bindingWordAt(args, index);
+        if (candidate !== undefined) {
+            out.push(candidate);
+        }
+    }
+    return out;
+}
+
+export function bindingWordAt(
+    args: readonly Arg[],
+    index: number,
+): BindingWord | undefined {
+    const arg = args[index];
+    if (arg === undefined) {
+        return undefined;
+    }
+    const parts = arg.word.parts;
+    if (parts.length !== 1 || parts[0]?.kind !== "ParameterExpansion") {
+        return undefined;
+    }
+    const binding = soleBinding(arg);
+    if (binding === undefined) {
+        return undefined;
+    }
+    const fieldIndices: number[] = [];
+    for (let position = 0; position < args.length; position += 1) {
+        const other = args[position];
+        if (other !== undefined && other.word === arg.word) {
+            if (soleBinding(other) !== binding) {
+                return undefined;
+            }
+            fieldIndices.push(position);
+        }
+    }
+    return { binding, word: arg.word, fieldIndices };
+}
+
+export interface EditableValue {
+    readonly doc: ScriptDocument;
+    readonly start: number;
+    readonly end: number;
+    readonly style: ValueStyle;
+}
+
+/** The editable value of an assignment, when it has a simple quotable shape. */
+export function editableValue(
+    binding: Binding,
+    doc: ScriptDocument,
+): EditableValue | undefined {
+    const assignment = binding.assignment;
+    if (assignment === undefined) {
+        return undefined;
+    }
+    if (assignment.kind === "synthetic") {
+        return undefined;
+    }
+    if (assignment.kind === "Assignment") {
+        if (assignment.append || assignment.index !== undefined) {
+            return undefined;
+        }
+        if (assignment.value.kind !== "Word") {
+            return undefined;
+        }
+        if (!matchesAssignment(doc, assignment)) {
+            return undefined;
+        }
+        const style = valueStyle(assignment.value);
+        if (style === undefined) {
+            return undefined;
+        }
+        return {
+            doc,
+            start: assignment.valueSpan.start,
+            end: assignment.valueSpan.end,
+            style,
+        };
+    }
+    const word = assignment.word;
+    if (assignment.parsed.append || assignment.parsed.index !== undefined) {
+        return undefined;
+    }
+    const first = word.parts[0];
+    if (first === undefined || first.kind !== "Literal") {
+        return undefined;
+    }
+    const eq = first.value.indexOf("=");
+    if (eq === -1) {
+        return undefined;
+    }
+    if (
+        doc.text.slice(word.span.start, word.span.start + eq) !==
+        `${assignment.parsed.name}=`
+    ) {
+        return undefined;
+    }
+    const start = first.span.start + eq + 1;
+    const end = word.span.end;
+    if (word.parts.length === 1) {
+        return { doc, start, end, style: "bare" };
+    }
+    const valuePart = word.parts[1];
+    if (valuePart === undefined || word.parts.length !== 2) {
+        return undefined;
+    }
+    const style = partStyle(valuePart);
+    return style === undefined ? undefined : { doc, start, end, style };
+}
+
+/**
+ * Whether the assignment's span really lives in `doc`. The interpreter leaves
+ * `Binding.doc` undefined, so the rewriter recovers the document from the uses
+ * and checks the source text actually starts with the assignment's name.
+ */
+function matchesAssignment(doc: ScriptDocument, assignment: Assignment): boolean {
+    const raw = doc.text.slice(assignment.nameSpan.start, assignment.nameSpan.end);
+    return raw === assignment.name && raw.length > 0;
+}
+
+function valueStyle(word: Word): ValueStyle | undefined {
+    const parts = word.parts;
+    if (parts.length !== 1) {
+        return undefined;
+    }
+    const part = parts[0];
+    return part === undefined ? undefined : partStyle(part);
+}
+
+function partStyle(part: WordPart): ValueStyle | undefined {
+    switch (part.kind) {
+        case "SingleQuoted":
+            return "single";
+        case "DoubleQuoted":
+        case "LocaleQuoted":
+            return "double";
+        case "Literal":
+        case "AnsiCQuoted":
+            return "bare";
+        default:
+            return undefined;
+    }
+}
+
+/** Renders `value` in `style`, keeping the assignment's original quoting. */
+export function renderValue(
+    value: string,
+    style: ValueStyle,
+    quoter: ShellQuoter,
+): string {
+    if (style === "single") {
+        return `'${value.replaceAll("'", "'\\''")}'`;
+    }
+    if (style === "double") {
+        return `"${value.replace(/[\\$`"]/g, "\\$&")}"`;
+    }
+    return quoter.quote(value);
+}
+
+/**
+ * Whether an unquoted expansion of `value` splits back into exactly one word
+ * equal to `value`: no IFS whitespace, glob or shell-special characters.
+ */
+export function splitSafe(value: string): boolean {
+    if (value === "") {
+        return false;
+    }
+    return /^[^\s*?[\]'"\\$`]+$/.test(value);
+}

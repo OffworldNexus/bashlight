@@ -1,10 +1,10 @@
+import { isRecord } from "../shared/guards.ts";
+
 /** A parsed JSON object, still untyped at this point. */
 export type JsonObject = Readonly<Record<string, unknown>>;
 
-/** True for a non-null, non-array object. */
-export function isObject(value: unknown): value is JsonObject {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+/** The non-null, non-array object guard, under the name the project used. */
+export { isRecord as isObject };
 
 /**
  * Parses a JSON document into an object, returning `undefined` for anything
@@ -17,5 +17,5 @@ export function parseJsonObject(text: string | undefined): JsonObject | undefine
     } catch {
         parsed = undefined;
     }
-    return isObject(parsed) ? parsed : undefined;
+    return isRecord(parsed) ? parsed : undefined;
 }

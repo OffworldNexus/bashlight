@@ -2,3 +2,5 @@ node_modules
 bun.lock
 corpus/*.jsonl
 corpus/*.json
+# Agent instructions are prose owned by the harness, not source to reformat.
+.opencode/agent
